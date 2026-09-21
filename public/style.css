@@ -211,6 +211,47 @@ tbody tr:last-child td { border-bottom: 0; }
   box-shadow: 0 6px 20px rgba(0, 0, 0, .2);
 }
 
+/* ---------- 교사 관리 패널 ---------- */
+.review-panel .btns button.current { outline: 2px solid var(--accent); outline-offset: 2px; font-weight: 700; }
+.assignee { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 4px; }
+select { font: inherit; }
+
+/* ---------- 출결 ---------- */
+.session-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 16px; }
+.session-tabs a {
+  flex: none; text-decoration: none; color: var(--text); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 12px; text-align: center; font-weight: 600; font-size: 14px;
+}
+.session-tabs a small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+.session-tabs a.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.session-tabs a.active small { color: #fff; opacity: .85; }
+.att-list { display: grid; gap: 16px; }
+.att-list .card + .card { margin-top: 0; }
+.att-table td { vertical-align: middle; }
+.att-table .nm { width: 110px; white-space: nowrap; }
+.att-marks { display: flex; flex-wrap: wrap; gap: 4px; }
+.att-marks label {
+  position: relative; display: inline-flex; align-items: center; margin: 0; padding: 4px 11px;
+  border: 1px solid var(--line); border-radius: 999px; font-weight: 500; font-size: 13px; cursor: pointer; background: #fff;
+}
+.att-marks input { position: absolute; opacity: 0; pointer-events: none; }
+.att-marks label:has(input:focus-visible) { outline: 2px solid var(--accent); }
+.att-marks label.m-ok:has(input:checked) { background: var(--st-approved-bg); border-color: var(--st-approved-fg); color: var(--st-approved-fg); font-weight: 700; }
+.att-marks label.m-late:has(input:checked) { background: var(--st-draft-bg); border-color: var(--st-draft-fg); color: var(--st-draft-fg); font-weight: 700; }
+.att-marks label.m-absent:has(input:checked) { background: var(--st-revise-bg); border-color: var(--st-revise-fg); color: var(--st-revise-fg); font-weight: 700; }
+.att-marks label.m-excused:has(input:checked) { background: var(--st-submitted-bg); border-color: var(--st-submitted-fg); color: var(--st-submitted-fg); font-weight: 700; }
+.att-summary th.c, .att-summary td.c { text-align: center; padding: 6px 8px; min-width: 34px; }
+.att-summary th.now { background: var(--accent-soft); color: var(--accent); }
+.att-summary td.m-ok { color: var(--st-approved-fg); }
+.att-summary td.m-late { color: var(--st-draft-fg); font-weight: 700; }
+.att-summary td.m-absent { color: var(--st-revise-fg); font-weight: 700; }
+.att-summary td.m-excused { color: var(--st-submitted-fg); font-weight: 700; }
+
+/* ---------- 예산 ---------- */
+td.num, th.num { text-align: right; white-space: nowrap; }
+td.over, .over b { color: var(--danger); }
+.budget-bar { height: 10px; margin-top: 0; }
+
 /* ---------- 접속코드 카드 ---------- */
 .pin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .pin-card { background: var(--surface); border: 1px dashed #b9b6ab; border-radius: 8px; padding: 14px 16px; break-inside: avoid; }

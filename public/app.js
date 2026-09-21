@@ -4,7 +4,7 @@ import {
   connectAuthEmulator, EmailAuthProvider, reauthenticateWithCredential, updatePassword,
 } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js';
 import {
-  getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, setDoc, deleteDoc,
+  getFirestore, connectFirestoreEmulator, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   collection, query, limit, runTransaction, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
 import { firebaseConfig } from './firebase-config.js';
@@ -37,11 +37,13 @@ const STATUS = {
   empty: { label: '미작성', cls: 'st-empty' },
   draft: { label: '작성 중', cls: 'st-draft' },
   submitted: { label: '제출됨', cls: 'st-submitted' },
-  revise: { label: '보완 요청', cls: 'st-revise' },
+  revise: { label: '요청됨', cls: 'st-revise' },
   approved: { label: '확인 완료', cls: 'st-approved' },
 };
 const DONE = ['submitted', 'revise', 'approved'];
 const LOG_TEXT_FIELDS = ['content', 'results', 'issues', 'nextPlan', 'references'];
+const ATT_MARKS = ['출석', '지각', '조퇴', '결석', '공결'];
+const BUDGET_PER_PERSON = 25000;
 const PIN_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 
 // ---------- 공통 도우미 ----------
@@ -86,6 +88,26 @@ function toast(msg) {
 
 function block(title, text) {
   return `<div class="readonly-block"><h3>${esc(title)}</h3>${text && String(text).trim() ? `<div>${esc(text)}</div>` : '<div class="empty">작성 안 됨</div>'}</div>`;
+}
+
+function fmtWon(n) {
+  return `${Number(n || 0).toLocaleString('ko-KR')}원`;
+}
+
+// 팀 예산 한도 = 인원 × 1인당 금액. 남은 예산은 구매 예정까지 뺀 값.
+function budgetOf(team) {
+  const purchases = team.purchases || [];
+  const sum = arr => arr.reduce((n, p) => n + (Number(p.amount) || 0), 0);
+  const limit = team.members.length * BUDGET_PER_PERSON;
+  const spent = sum(purchases.filter(p => p.status === '구매완료'));
+  const pending = sum(purchases.filter(p => p.status !== '구매완료'));
+  const planned = (team.budget || []).reduce((n, b) => n + (Number(b.total) || 0), 0);
+  return { limit, spent, pending, planned, remaining: limit - spent - pending };
+}
+
+function budgetBar(b) {
+  const max = Math.max(b.limit, b.spent + b.pending) || 1;
+  return `<div class="progress budget-bar"><span style="width:${b.spent / max * 100}%;background:var(--accent)"></span><span style="width:${b.pending / max * 100}%;background:#e0b04a"></span></div>`;
 }
 
 function won(n) {
@@ -133,14 +155,22 @@ async function fetchLogs(teamId) {
   return logs;
 }
 
+async function fetchAttendance(teamId) {
+  const att = {};
+  (await getDocs(collection(db, 'teams', teamId, 'attendance'))).forEach(d => {
+    att[d.id] = { marks: {}, notes: {}, ...d.data() };
+  });
+  return att;
+}
+
 async function fetchTeam(teamId) {
   const snap = await getDoc(doc(db, 'teams', teamId));
   if (!snap.exists()) throw new Error('팀을 찾을 수 없습니다.');
   const team = { id: snap.id, ...snap.data() };
-  const found = await fetchLogs(teamId);
+  const [found, attendance] = await Promise.all([fetchLogs(teamId), fetchAttendance(teamId)]);
   const logs = {};
   for (const s of team.sessions) logs[s.no] = found[s.no] || emptyLog();
-  return { team, logs };
+  return { team, logs, attendance };
 }
 
 async function fetchAllTeams() {
@@ -148,7 +178,9 @@ async function fetchAllTeams() {
   const teams = snaps.docs
     .map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'ko'));
-  await Promise.all(teams.map(async t => { t.logs = await fetchLogs(t.id); }));
+  await Promise.all(teams.map(async t => {
+    [t.logs, t.attendance] = await Promise.all([fetchLogs(t.id), fetchAttendance(t.id)]);
+  }));
   return teams;
 }
 
@@ -176,24 +208,28 @@ async function saveLog(team, no, action, fields, baseRev) {
       next.status = 'submitted';
       next.submittedAt = now;
     } else {
-      next.status = !cur || cur.status === 'draft' ? 'draft' : cur.status;
+      next.status = !cur || ['draft', 'empty'].includes(cur.status) ? 'draft' : cur.status;
     }
     tx.set(ref, next);
   });
 }
 
-async function reviewLog(teamId, no, decision, feedback) {
+// 교사가 기록 상태를 바꾼다. 아직 없는 기록이면 새로 만든다(작성 요청 등).
+async function setLogStatus(teamId, no, status, feedback, assignee) {
   const ref = doc(db, 'teams', teamId, 'logs', String(no));
   await runTransaction(db, async tx => {
     const snap = await tx.get(ref);
-    if (!snap.exists()) throw new Error('아직 작성되지 않은 기록입니다.');
-    const cur = snap.data();
+    const cur = snap.exists() ? snap.data() : emptyLog();
+    const hasContent = !!(cur.content || '').trim();
+    const next = status === 'draft' && !hasContent ? 'empty' : status;
     const now = new Date().toISOString();
-    const label = { approved: '확인 완료', revise: '보완 요청', submitted: '확인 취소' }[decision];
-    tx.update(ref, {
-      status: decision,
+    const label = { approved: '확인 완료', revise: hasContent ? '보완 요청' : '작성 요청', submitted: '제출 처리', draft: '미제출로 변경', empty: '미제출로 변경' }[next];
+    tx.set(ref, {
+      ...cur,
+      status: next,
       feedback,
       feedbackAt: now,
+      assignee: assignee || '',
       rev: (cur.rev || 0) + 1,
       history: [{ at: now, by: '담당 교사', action: label }, ...(cur.history || [])].slice(0, 30),
     });
@@ -317,8 +353,8 @@ async function logout() {
 function page(html, active) {
   const me = state.me;
   const links = me.role === 'teacher'
-    ? [['dashboard', '#/dashboard', '대시보드'], ['pins', '#/pins', '접속코드'], ['settings', '#/settings', '설정']]
-    : [['team', `#/team/${me.teamId}`, '차시 기록'], ['info', `#/team/${me.teamId}/info`, '우리 팀 계획서']];
+    ? [['dashboard', '#/dashboard', '대시보드'], ['attendance', '#/attendance', '출결'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속코드'], ['settings', '#/settings', '설정']]
+    : [['team', `#/team/${me.teamId}`, '차시 기록'], ['budget', `#/team/${me.teamId}/budget`, '예산'], ['info', `#/team/${me.teamId}/info`, '우리 팀 계획서']];
   $app.innerHTML = `
     <header class="topbar"><div class="wrap topbar-in">
       <a class="brand" href="#/">SLAT<span>학교주도활동 기록장</span></a>
@@ -344,12 +380,16 @@ async function route() {
     if (me.role === 'teacher') {
       if (parts[0] === 'dashboard') return await renderDashboard();
       if (parts[0] === 'pins') return await renderPins();
+      if (parts[0] === 'attendance') return await renderAttendance(Number(parts[1]) || 0);
+      if (parts[0] === 'budget') return await renderBudgetOverview();
+      if (parts[0] === 'team' && parts[2] === 's' && parts[3] && parts[4] === 'edit') return await renderLog(parts[1], Number(parts[3]), true);
       if (parts[0] === 'settings') return renderSettings();
       if (parts[0] === 'team' && parts[1] && parts[2] === 'edit') return await renderEdit(parts[1]);
     }
     if (parts[0] === 'team' && parts[1]) {
-      if (parts[2] === 's' && parts[3]) return await renderLog(parts[1], Number(parts[3]));
+      if (parts[2] === 's' && parts[3] && !parts[4]) return await renderLog(parts[1], Number(parts[3]));
       if (parts[2] === 'info') return await renderInfo(parts[1]);
+      if (parts[2] === 'budget') return await renderTeamBudget(parts[1]);
       if (!parts[2]) return await renderTeam(parts[1]);
     }
     location.replace(home);
@@ -498,7 +538,7 @@ async function renderDashboard() {
     const submitted = t.sessions.filter(s => DONE.includes(st(t, s.no))).length;
     return `<tr>
       <td class="team-cell"><a href="#/team/${t.id}">${esc(t.name)}</a><div class="small muted">${esc(t.topic)}</div>
-        <div class="small muted">${t.members.length}명 · 제출 ${submitted}/${t.sessions.length}</div></td>
+        <div class="small muted">${t.members.length}명 · 제출 ${submitted}/${t.sessions.length} · 예산 잔액 ${fmtWon(budgetOf(t).remaining)}</div></td>
       ${cells.join('')}</tr>`;
   }).join('');
 
@@ -565,7 +605,7 @@ function downloadCsv(teams) {
     const s = String(v ?? '');
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = ['팀명', '주제', '차시', '날짜', '계획', '상태', '참여자', '활동 내용', '개인별 역할·기여', '결과·산출물', '어려운 점·해결', '다음 차시 계획', '참고자료·출처', '교사 피드백', '제출 일시', '최종 수정'];
+  const header = ['팀명', '주제', '차시', '날짜', '계획', '상태', '교사 출결', '참여자', '활동 내용', '개인별 역할·기여', '결과·산출물', '어려운 점·해결', '다음 차시 계획', '참고자료·출처', '교사 피드백', '제출 일시', '최종 수정'];
   const rows = [header];
   for (const t of teams) {
     const nameOf = sid => t.members.find(m => m.sid === sid)?.name || sid;
@@ -573,6 +613,7 @@ function downloadCsv(teams) {
       const l = t.logs[s.no] || emptyLog();
       rows.push([
         t.name, t.topic, s.no, s.date, s.plan, STATUS[l.status].label,
+        Object.entries(t.attendance?.[s.no]?.marks || {}).map(([sid, m]) => `${nameOf(sid)}:${m}`).join(', '),
         l.attendance.map(nameOf).join(', '), l.content,
         Object.entries(l.contributions || {}).filter(([, v]) => v).map(([sid, v]) => `${nameOf(sid)}: ${v}`).join('\n'),
         l.results, l.issues, l.nextPlan, l.references, l.feedback,
@@ -592,13 +633,27 @@ function downloadCsv(teams) {
 // ---------- 팀 홈 (차시 목록) ----------
 
 async function renderTeam(teamId) {
-  const { team, logs } = await fetchTeam(teamId);
+  const { team, logs, attendance } = await fetchTeam(teamId);
   const me = state.me;
   const today = todayStr();
   const nowNo = (team.sessions.find(s => s.date >= today) || {}).no;
   const count = st => team.sessions.filter(s => logs[s.no].status === st).length;
   const n = team.sessions.length || 1;
   const leader = team.members.find(m => m.sid === team.leaderSid);
+
+  const nameOf = sid => team.members.find(m => m.sid === sid)?.name || sid;
+  const extra = (no, l) => {
+    const marks = attendance[no]?.marks || {};
+    let att = '';
+    if (me.role === 'teacher') {
+      const counts = ATT_MARKS.map(k => [k, Object.values(marks).filter(v => v === k).length]).filter(([, c]) => c);
+      if (counts.length) att = `출결 ${counts.map(([k, c]) => `${k} ${c}`).join(' · ')}`;
+    } else if (marks[me.sid]) {
+      att = `내 출결: ${marks[me.sid]}`;
+    }
+    const who = l.assignee ? `✍ 작성 담당: ${esc(nameOf(l.assignee))}${l.assignee === me.sid ? ' (나)' : ''}` : '';
+    return att || who ? `<div class="meta">${[who, att].filter(Boolean).join(' · ')}</div>` : '';
+  };
 
   const cards = team.sessions.map(s => {
     const l = logs[s.no];
@@ -611,6 +666,7 @@ async function renderTeam(teamId) {
         <div>
           <div class="plan">${esc(s.plan) || '<span class="muted">(계획 미입력)</span>'}</div>
           <div class="meta">${l.updatedAt ? `마지막 수정 ${fmtDateTime(l.updatedAt)} · ${esc(l.updatedBy)}` : s.date > today ? '예정된 차시' : '아직 기록이 없습니다'}</div>
+          ${extra(s.no, l)}
           ${l.feedback ? `<div class="fb-line">💬 선생님: ${esc(l.feedback.length > 60 ? l.feedback.slice(0, 60) + '…' : l.feedback)}</div>` : ''}
         </div>
         <div class="right">${badge(l.status, s.date)}<span class="btn btn-sm">${action}</span></div>
@@ -627,6 +683,7 @@ async function renderTeam(teamId) {
         </div>
         <div class="actions">
           <a class="btn" href="#/team/${team.id}/info">계획서 보기</a>
+          <a class="btn" href="#/team/${team.id}/budget">예산</a>
           ${me.role === 'teacher' ? `<a class="btn" href="#/team/${team.id}/edit">계획서 편집</a>` : ''}
         </div>
       </div>
@@ -649,17 +706,18 @@ async function renderTeam(teamId) {
 
 // ---------- 차시 기록 (작성·검토) ----------
 
-async function renderLog(teamId, no) {
-  const { team, logs } = await fetchTeam(teamId);
+async function renderLog(teamId, no, editMode = false) {
+  const { team, logs, attendance } = await fetchTeam(teamId);
   const s = team.sessions.find(x => x.no === no);
   if (!s) throw new Error('차시를 찾을 수 없습니다.');
   const log = logs[no];
   const me = state.me;
   const isTeacher = me.role === 'teacher';
-  const editable = !isTeacher && log.status !== 'approved';
+  const editable = isTeacher ? editMode : log.status !== 'approved';
   const nameOf = sid => team.members.find(m => m.sid === sid)?.name || sid;
   const prev = team.sessions.find(x => x.no === no - 1);
   const next = team.sessions.find(x => x.no === no + 1);
+  const base = `#/team/${team.id}/s/${no}`;
 
   const planBox = `
     <div class="card plan-box">
@@ -673,15 +731,17 @@ async function renderLog(teamId, no) {
       </div>
     </div>`;
 
-  const feedback = log.feedback
-    ? `<div class="feedback-box ${log.status === 'revise' ? 'revise' : ''}">
-         <b>💬 선생님 피드백${log.status === 'revise' ? ' — 보완 후 다시 제출해 주세요' : ''}</b>
-         <div style="white-space:pre-wrap;margin-top:4px">${esc(log.feedback)}</div>
+  const requested = log.status === 'revise';
+  const feedback = log.feedback || log.assignee
+    ? `<div class="feedback-box ${requested ? 'revise' : ''}">
+         <b>💬 ${requested ? (log.content ? '선생님 보완 요청 — 고친 뒤 다시 제출해 주세요' : '선생님 작성 요청 — 이 차시 기록을 작성해 제출해 주세요') : '선생님 피드백'}</b>
+         ${log.assignee ? `<div class="assignee">✍ 작성 담당: ${esc(nameOf(log.assignee))}${log.assignee === me.sid ? ' (나)' : ''}</div>` : ''}
+         ${log.feedback ? `<div style="white-space:pre-wrap;margin-top:4px">${esc(log.feedback)}</div>` : ''}
          <span class="who">${fmtDateTime(log.feedbackAt)}</span></div>`
     : '';
 
   const head = `
-    <div class="crumb"><a href="${isTeacher ? '#/dashboard' : `#/team/${team.id}`}">${isTeacher ? '대시보드' : '차시 기록'}</a> › ${isTeacher ? `<a href="#/team/${team.id}">${esc(team.name)}</a> › ` : ''}${s.no}차시</div>
+    <div class="crumb"><a href="${isTeacher ? '#/dashboard' : `#/team/${team.id}`}">${isTeacher ? '대시보드' : '차시 기록'}</a> › ${isTeacher ? `<a href="#/team/${team.id}">${esc(team.name)}</a> › ` : ''}${isTeacher && editMode ? `<a href="${base}">${s.no}차시</a> › 직접 작성` : `${s.no}차시`}</div>
     <div class="page-head"><div><h1>${s.no}차시 활동 기록 ${badge(log.status, s.date)}</h1>
       <p class="muted small">${esc(team.name)} · ${fmtDate(s.date)} ${esc(team.time)}${log.updatedAt ? ` · 마지막 수정 ${fmtDateTime(log.updatedAt)} (${esc(log.updatedBy)})` : ''}</p></div></div>`;
 
@@ -690,6 +750,7 @@ async function renderLog(teamId, no) {
     main = `
       <form class="card" id="log-form">
         ${feedback}
+        ${isTeacher ? '<p class="small muted" style="margin-top:0">✏ 선생님이 작성하는 중입니다. 수정자는 ‘담당 교사’로 기록됩니다.</p>' : ''}
         <div class="field"><label>참여자 <span class="hint">오늘 활동에 참여한 팀원을 모두 체크</span></label>
           <div class="attend">${team.members.map(m => `<label><input type="checkbox" name="att" value="${esc(m.sid)}" ${log.attendance.includes(m.sid) ? 'checked' : ''}>${esc(m.name)}</label>`).join('')}</div></div>
         <div class="field"><label for="content">오늘 한 활동 <span class="hint">필수 · 무엇을, 어떻게 했는지 구체적으로</span></label>
@@ -707,41 +768,58 @@ async function renderLog(teamId, no) {
         <div class="field"><label for="references">참고자료·출처 <span class="hint">책·논문·웹사이트 주소 등 (저작권 표기)</span></label>
           <textarea id="references" rows="2">${esc(log.references)}</textarea></div>
         <div class="form-actions">
-          <span class="grow">${log.status === 'submitted' ? '이미 제출한 기록입니다. 고친 뒤 다시 제출할 수 있습니다.' : '임시저장은 팀원끼리 함께 볼 수 있고, 제출해야 선생님께 전달됩니다.'}</span>
-          <button type="button" id="save">임시저장</button>
-          <button type="submit" class="btn-primary">${DONE.includes(log.status) ? '다시 제출' : '제출하기'}</button>
+          ${isTeacher
+            ? `<span class="grow">저장만 하면 상태는 그대로 유지됩니다.</span>
+               <a class="btn" href="${base}">취소</a>
+               <button type="button" id="save">저장</button>
+               <button type="submit" class="btn-primary">저장하고 제출 처리</button>`
+            : `<span class="grow">${log.status === 'submitted' ? '이미 제출한 기록입니다. 고친 뒤 다시 제출할 수 있습니다.' : '임시저장은 팀원끼리 함께 볼 수 있고, 제출해야 선생님께 전달됩니다.'}</span>
+               <button type="button" id="save">임시저장</button>
+               <button type="submit" class="btn-primary">${DONE.includes(log.status) ? '다시 제출' : '제출하기'}</button>`}
         </div>
         <p class="err" id="log-err"></p>
       </form>`;
   } else {
     const contribs = team.members.map(m => log.contributions[m.sid] ? `${m.name}: ${log.contributions[m.sid]}` : '').filter(Boolean).join('\n');
+    const written = log.content || log.results || log.attendance.length;
+    const marks = attendance[no]?.marks || {};
+    const cur = ['empty', 'draft'].includes(log.status) ? 'draft' : log.status;
+    const statusBtn = (st, label, cls = '') => `<button type="button" class="${cls} ${cur === st ? 'current' : ''}" data-status="${st}">${label}</button>`;
     main = `
       <div>
         <div class="card">
           ${isTeacher ? '' : feedback}
           ${!isTeacher && log.status === 'approved' ? '<p class="muted small">✅ 선생님 확인이 끝난 기록입니다. 수정이 필요하면 선생님께 말씀드리세요.</p>' : ''}
-          ${block('참여자', log.attendance.map(nameOf).join(', '))}
-          ${block('오늘 한 활동', log.content)}
-          ${block('개인별 역할·기여', contribs)}
-          ${block('결과·산출물', log.results)}
-          ${block('어려웠던 점과 해결 방법', log.issues)}
-          ${block('다음 차시 계획', log.nextPlan)}
-          ${block('참고자료·출처', log.references)}
-          ${log.history?.length ? `<details><summary class="small muted">수정 이력 (${log.history.length})</summary><ul class="history">${log.history.map(h => `<li>${fmtDateTime(h.at)} · ${esc(h.by)} · ${esc(h.action)}</li>`).join('')}</ul></details>` : ''}
+          ${written ? `
+            ${block('참여자', log.attendance.map(nameOf).join(', '))}
+            ${block('오늘 한 활동', log.content)}
+            ${block('개인별 역할·기여', contribs)}
+            ${block('결과·산출물', log.results)}
+            ${block('어려웠던 점과 해결 방법', log.issues)}
+            ${block('다음 차시 계획', log.nextPlan)}
+            ${block('참고자료·출처', log.references)}` : '<p class="muted">아직 작성된 내용이 없습니다.</p>'}
+          ${log.history?.length ? `<details><summary class="small muted">변경 이력 (${log.history.length})</summary><ul class="history">${log.history.map(h => `<li>${fmtDateTime(h.at)} · ${esc(h.by)} · ${esc(h.action)}</li>`).join('')}</ul></details>` : ''}
         </div>
         ${isTeacher ? `
           <div class="card review-panel">
-            <h2>교사 검토</h2>
-            ${log.status === 'empty' ? '<p class="muted">아직 학생이 작성하지 않았습니다.</p>' : `
-              <div class="field" style="margin-top:10px"><label for="fb">피드백 <span class="hint">학생 화면에 그대로 보입니다</span></label>
-                <textarea id="fb" rows="4" placeholder="잘한 점, 보완할 점을 적어 주세요.">${esc(log.feedback)}</textarea></div>
-              <div class="btns">
-                <button class="btn-primary" data-decision="approved">✅ 확인 완료</button>
-                <button class="btn-danger" data-decision="revise">↩ 보완 요청</button>
-                ${log.status === 'approved' || log.status === 'revise' ? '<button data-decision="submitted">검토 취소 (제출 상태로)</button>' : ''}
-                <span class="muted small" style="align-self:center">${log.status === 'draft' ? '※ 아직 학생이 제출하지 않은 임시저장 상태입니다.' : ''}</span>
-              </div>
-              <p class="err" id="rv-err"></p>`}
+            <h2>교사 관리</h2>
+            <p class="small muted">현재 상태: <b>${STATUS[log.status].label}</b> · 출결: ${Object.keys(marks).length
+              ? ATT_MARKS.map(k => [k, Object.values(marks).filter(v => v === k).length]).filter(([, c]) => c).map(([k, c]) => `${k} ${c}`).join(', ')
+              : '미입력'} <a href="#/attendance/${no}">출결 입력</a></p>
+            <div class="field"><label for="fb">피드백·요청 메시지 <span class="hint">학생 화면에 그대로 보입니다</span></label>
+              <textarea id="fb" rows="3" placeholder="잘한 점, 보완할 점, 작성해 올 내용 등을 적어 주세요.">${esc(log.feedback)}</textarea></div>
+            <div class="field"><label for="assignee">작성 담당 학생 <span class="hint">요청할 때 지정하면 그 학생 화면에 표시</span></label>
+              <select id="assignee"><option value="">팀 전체</option>${team.members.map(m => `<option value="${esc(m.sid)}" ${log.assignee === m.sid ? 'selected' : ''}>${esc(m.name)} (${esc(m.sid)})</option>`).join('')}</select></div>
+            <div class="small muted" style="margin-bottom:6px">상태 변경 — 누르면 위 메시지·담당도 함께 저장됩니다</div>
+            <div class="btns">
+              ${statusBtn('draft', '미제출')}
+              ${statusBtn('submitted', '제출됨')}
+              ${statusBtn('revise', '↩ 학생에게 작성·보완 요청')}
+              ${statusBtn('approved', '✅ 확인 완료', 'btn-primary')}
+            </div>
+            <p class="small muted">미제출·요청 상태에서는 학생이 고칠 수 있고, 확인 완료하면 학생 수정이 잠깁니다.</p>
+            <div class="btns"><a class="btn" href="${base}/edit">✏ 선생님이 직접 작성·수정</a></div>
+            <p class="err" id="rv-err"></p>
           </div>` : ''}
       </div>`;
   }
@@ -770,9 +848,14 @@ async function renderLog(teamId, no) {
       try {
         await saveLog(team, no, action, collect(), log.rev);
         state.dirty = false;
-        toast(action === 'submit' ? '제출했습니다. 선생님이 확인하면 여기에 표시돼요.' : '임시저장했습니다.');
-        if (action === 'submit') location.hash = `#/team/${team.id}`;
-        else route();
+        if (isTeacher) {
+          toast(action === 'submit' ? '저장하고 제출 처리했습니다.' : '저장했습니다.');
+          location.hash = base;
+        } else {
+          toast(action === 'submit' ? '제출했습니다. 선생님이 확인하면 여기에 표시돼요.' : '임시저장했습니다.');
+          if (action === 'submit') location.hash = `#/team/${team.id}`;
+          else route();
+        }
       } catch (e) {
         $('#log-err').textContent = friendlyError(e);
         $$('#log-form button').forEach(b => { b.disabled = false; });
@@ -782,22 +865,263 @@ async function renderLog(teamId, no) {
     form.onsubmit = e => { e.preventDefault(); save('submit'); };
   }
 
-  $$('[data-decision]').forEach(btn => btn.onclick = async () => {
-    const decision = btn.dataset.decision;
+  $$('[data-status]').forEach(btn => btn.onclick = async () => {
+    const status = btn.dataset.status;
     const feedbackText = $('#fb').value.slice(0, 2000);
-    if (decision === 'revise' && !feedbackText.trim()) {
-      $('#rv-err').textContent = '보완 요청 시에는 무엇을 보완할지 피드백을 적어 주세요.';
+    if (status === 'revise' && !feedbackText.trim()) {
+      $('#rv-err').textContent = '요청할 때는 무엇을 작성·보완할지 메시지를 적어 주세요.';
+      $('#fb').focus();
       return;
     }
+    $$('[data-status]').forEach(b => { b.disabled = true; });
     try {
-      await reviewLog(team.id, no, decision, feedbackText);
-      toast({ approved: '확인 완료로 처리했습니다.', revise: '보완을 요청했습니다.', submitted: '검토를 취소했습니다.' }[decision]);
-      const nextWaiting = decision !== 'submitted' && team.sessions.find(x => x.no > no && logs[x.no].status === 'submitted');
-      location.hash = nextWaiting ? `#/team/${team.id}/s/${nextWaiting.no}` : '#/dashboard';
+      await setLogStatus(team.id, no, status, feedbackText, $('#assignee').value);
+      toast({ approved: '확인 완료로 처리했습니다.', revise: '학생에게 요청했습니다.', submitted: '제출됨으로 바꿨습니다.', draft: '미제출로 바꿨습니다. 학생이 수정할 수 있습니다.' }[status]);
+      const nextWaiting = status === 'approved' && team.sessions.find(x => x.no > no && logs[x.no].status === 'submitted');
+      if (nextWaiting) location.hash = `#/team/${team.id}/s/${nextWaiting.no}`;
+      else route();
     } catch (e) {
       $('#rv-err').textContent = friendlyError(e);
+      $$('[data-status]').forEach(b => { b.disabled = false; });
     }
   });
+}
+
+// ---------- 출결 (교사) ----------
+
+const MARK_CLS = { 출석: 'm-ok', 지각: 'm-late', 조퇴: 'm-late', 결석: 'm-absent', 공결: 'm-excused' };
+const MARK_ABBR = { 출석: '○', 지각: '지', 조퇴: '조', 결석: '×', 공결: '공' };
+
+async function renderAttendance(selNo) {
+  const teams = await fetchAllTeams();
+  if (!teams.length) return page('<div class="card">팀이 없습니다. 대시보드에서 먼저 팀을 만드세요.</div>', 'attendance');
+  const today = todayStr();
+  const maxNo = Math.max(...teams.map(t => t.sessions.length));
+  const ref = teams.find(t => t.sessions.length === maxNo).sessions;
+  const no = ref.some(s => s.no === selNo) ? selNo : ([...ref].reverse().find(s => s.date <= today) || ref[0]).no;
+
+  const teamCard = t => {
+    const s = t.sessions.find(x => x.no === no);
+    if (!s) return '';
+    const a = t.attendance[no] || { marks: {}, notes: {} };
+    const participants = t.logs[no]?.attendance || [];
+    return `
+      <div class="card att-card" data-team="${t.id}">
+        <div class="section-title" style="margin:0 0 10px">
+          <h2>${esc(t.name)} <span class="small muted">${fmtDate(s.date)}${a.updatedAt ? ` · 저장 ${fmtDateTime(a.updatedAt)}` : ' · 미입력'}</span></h2>
+          <div class="actions">
+            <button type="button" class="btn-sm" data-all="${t.id}">모두 출석</button>
+            ${participants.length ? `<button type="button" class="btn-sm" data-fill="${t.id}" title="학생이 기록에 체크한 참여자는 출석, 나머지는 결석">기록 참여자로 채우기</button>` : ''}
+          </div>
+        </div>
+        <div class="table-scroll"><table class="att-table"><tbody>
+          ${t.members.map(m => `
+            <tr data-sid="${esc(m.sid)}">
+              <td class="nm">${esc(m.name)}<div class="small muted">${esc(m.sid)}</div></td>
+              <td><div class="att-marks">${ATT_MARKS.map(k => `<label class="${MARK_CLS[k]}"><input type="radio" name="att-${t.id}-${esc(m.sid)}" value="${k}" ${a.marks?.[m.sid] === k ? 'checked' : ''}>${k}</label>`).join('')}</div></td>
+              <td style="min-width:140px"><input type="text" data-note placeholder="비고" value="${esc(a.notes?.[m.sid] || '')}"></td>
+            </tr>`).join('') || '<tr><td class="muted">팀원이 없습니다.</td></tr>'}
+        </tbody></table></div>
+      </div>`;
+  };
+
+  const summary = teams.map(t => `
+    <h3 style="margin:18px 0 8px">${esc(t.name)}</h3>
+    <div class="table-scroll"><table class="att-summary">
+      <thead><tr><th>학생</th>${t.sessions.map(s => `<th class="c ${s.no === no ? 'now' : ''}">${s.no}</th>`).join('')}${ATT_MARKS.map(k => `<th class="c">${k}</th>`).join('')}</tr></thead>
+      <tbody>${t.members.map(m => {
+        const row = t.sessions.map(s => t.attendance[s.no]?.marks?.[m.sid] || '');
+        return `<tr><td>${esc(m.name)}</td>${row.map(v => `<td class="c ${MARK_CLS[v] || ''}">${v ? MARK_ABBR[v] : ''}</td>`).join('')}${ATT_MARKS.map(k => `<td class="c">${row.filter(v => v === k).length || ''}</td>`).join('')}</tr>`;
+      }).join('')}</tbody>
+    </table></div>`).join('');
+
+  page(`
+    <div class="page-head">
+      <div><h1>출결</h1><p class="muted small">차시를 고르고 학생별 출결을 체크한 뒤 [저장]하세요. 학생은 자기 출결만 볼 수 있습니다.</p></div>
+      <div class="actions"><button class="btn-primary" id="att-save">${no}차시 출결 저장</button></div>
+    </div>
+    <div class="session-tabs">${ref.map(s => `<a href="#/attendance/${s.no}" class="${s.no === no ? 'active' : ''}">${s.no}차시<small>${fmtDate(s.date)}</small></a>`).join('')}</div>
+    <div class="att-list">${teams.map(teamCard).join('')}</div>
+    <p class="err" id="att-err"></p>
+    <div class="section-title"><h2>출결 현황</h2><span class="legend">○ 출석 · 지 지각 · 조 조퇴 · × 결석 · 공 공결</span></div>
+    ${summary}`, 'attendance');
+
+  const list = $('.att-list');
+  list.addEventListener('change', () => { state.dirty = true; });
+  list.addEventListener('input', () => { state.dirty = true; });
+  const setMark = (teamId, sid, k) => {
+    const r = document.querySelector(`input[name="att-${teamId}-${sid}"][value="${k}"]`);
+    if (r) r.checked = true;
+  };
+  $$('[data-all]').forEach(b => b.onclick = () => {
+    const t = teams.find(x => x.id === b.dataset.all);
+    t.members.forEach(m => setMark(t.id, m.sid, '출석'));
+    state.dirty = true;
+  });
+  $$('[data-fill]').forEach(b => b.onclick = () => {
+    const t = teams.find(x => x.id === b.dataset.fill);
+    const p = t.logs[no]?.attendance || [];
+    t.members.forEach(m => setMark(t.id, m.sid, p.includes(m.sid) ? '출석' : '결석'));
+    state.dirty = true;
+  });
+  $('#att-save').onclick = async () => {
+    const batch = writeBatch(db);
+    const now = new Date().toISOString();
+    for (const t of teams) {
+      if (!t.sessions.some(s => s.no === no)) continue;
+      const marks = {}, notes = {};
+      for (const m of t.members) {
+        const r = document.querySelector(`input[name="att-${t.id}-${m.sid}"]:checked`);
+        if (r) marks[m.sid] = r.value;
+        const note = document.querySelector(`.att-card[data-team="${t.id}"] tr[data-sid="${m.sid}"] [data-note]`).value.trim();
+        if (note) notes[m.sid] = note.slice(0, 200);
+      }
+      batch.set(doc(db, 'teams', t.id, 'attendance', String(no)), { marks, notes, updatedAt: now });
+    }
+    $('#att-save').disabled = true;
+    try {
+      await batch.commit();
+      state.dirty = false;
+      toast(`${no}차시 출결을 저장했습니다.`);
+      route();
+    } catch (e) {
+      $('#att-err').textContent = friendlyError(e);
+      $('#att-save').disabled = false;
+    }
+  };
+}
+
+// ---------- 예산 ----------
+
+async function renderBudgetOverview() {
+  const teams = (await getDocs(collection(db, 'teams'))).docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  const all = teams.map(t => ({ t, b: budgetOf(t) }));
+  const tot = k => all.reduce((n, x) => n + x.b[k], 0);
+
+  page(`
+    <div class="page-head"><div><h1>예산</h1><p class="muted small">팀 한도 = 인원 × ${fmtWon(BUDGET_PER_PERSON)} · 팀 이름을 누르면 구매 내역을 관리합니다.</p></div></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>팀</th><th class="num">인원</th><th class="num">한도</th><th class="num">계획서 예산</th><th class="num">구매 완료</th><th class="num">구매 예정</th><th class="num">남은 예산</th><th>사용률</th></tr></thead>
+      <tbody>${all.map(({ t, b }) => `
+        <tr>
+          <td><a href="#/team/${t.id}/budget"><b>${esc(t.name)}</b></a></td>
+          <td class="num">${t.members.length}명</td>
+          <td class="num">${fmtWon(b.limit)}</td>
+          <td class="num ${b.planned > b.limit ? 'over' : ''}">${fmtWon(b.planned)}</td>
+          <td class="num">${fmtWon(b.spent)}</td>
+          <td class="num">${fmtWon(b.pending)}</td>
+          <td class="num ${b.remaining < 0 ? 'over' : ''}"><b>${fmtWon(b.remaining)}</b></td>
+          <td style="min-width:140px">${budgetBar(b)}</td>
+        </tr>`).join('')}
+        <tr><td><b>합계</b></td><td class="num">${teams.reduce((n, t) => n + t.members.length, 0)}명</td>
+          <td class="num"><b>${fmtWon(tot('limit'))}</b></td><td class="num">${fmtWon(tot('planned'))}</td>
+          <td class="num">${fmtWon(tot('spent'))}</td><td class="num">${fmtWon(tot('pending'))}</td>
+          <td class="num"><b>${fmtWon(tot('remaining'))}</b></td><td></td></tr>
+      </tbody>
+    </table></div>
+    <p class="small muted" style="margin-top:10px">남은 예산 = 한도 − 구매 완료 − 구매 예정. 계획서 예산이 한도를 넘으면 빨간색으로 표시됩니다.</p>`, 'budget');
+}
+
+async function renderTeamBudget(teamId) {
+  const { team } = await fetchTeam(teamId);
+  const isTeacher = state.me.role === 'teacher';
+  const rows = structuredClone(team.purchases || []);
+  const STATUSES = ['구매예정', '구매완료'];
+
+  const summaryHtml = b => `
+    <div class="stats">
+      <div class="stat"><div class="num">${fmtWon(b.limit)}</div><div class="lbl">팀 한도 (${team.members.length}명 × ${fmtWon(BUDGET_PER_PERSON)})</div></div>
+      <div class="stat"><div class="num">${fmtWon(b.spent)}</div><div class="lbl">구매 완료</div></div>
+      <div class="stat"><div class="num">${fmtWon(b.pending)}</div><div class="lbl">구매 예정</div></div>
+      <div class="stat ${b.remaining < 0 ? 'alert' : ''}"><div class="num">${fmtWon(b.remaining)}</div><div class="lbl">${b.remaining < 0 ? '⚠ 한도 초과' : '남은 예산 (예정 포함)'}</div></div>
+    </div>
+    <div style="margin-top:12px">${budgetBar(b)}</div>`;
+
+  const editRow = (p, i) => `
+    <tr data-i="${i}">
+      <td style="width:150px"><input type="date" data-p="date" value="${esc(p.date || '')}"></td>
+      <td><input type="text" data-p="item" value="${esc(p.item)}" placeholder="품목"></td>
+      <td><input type="text" data-p="use" value="${esc(p.use)}" placeholder="용도"></td>
+      <td style="width:76px"><input type="number" data-p="qty" min="0" value="${p.qty ?? 1}"></td>
+      <td style="width:110px"><input type="number" data-p="unitPrice" min="0" value="${p.unitPrice || ''}"></td>
+      <td class="num amt" style="width:100px">${fmtWon(p.amount)}</td>
+      <td style="width:100px"><input type="text" data-p="vendor" value="${esc(p.vendor)}"></td>
+      <td style="width:110px"><select data-p="status">${STATUSES.map(st => `<option ${p.status === st ? 'selected' : ''}>${st}</option>`).join('')}</select></td>
+      <td><input type="text" data-p="note" value="${esc(p.note)}" placeholder="비고"></td>
+      <td style="width:56px"><button type="button" class="btn-sm btn-danger" data-del="${i}">삭제</button></td>
+    </tr>`;
+  const viewRow = p => `
+    <tr><td>${esc(p.date)}</td><td>${esc(p.item)}</td><td>${esc(p.use)}</td><td class="num">${p.qty ?? ''}</td>
+      <td class="num">${p.unitPrice ? fmtWon(p.unitPrice) : ''}</td><td class="num">${fmtWon(p.amount)}</td>
+      <td>${esc(p.vendor)}</td><td><span class="badge ${p.status === '구매완료' ? 'st-approved' : 'st-draft'}">${esc(p.status)}</span></td><td>${esc(p.note)}</td></tr>`;
+
+  const collect = () => {
+    $$('#b-rows tr[data-i]').forEach(tr => {
+      const p = rows[tr.dataset.i];
+      tr.querySelectorAll('[data-p]').forEach(inp => {
+        const k = inp.dataset.p;
+        p[k] = ['qty', 'unitPrice'].includes(k) ? Math.max(0, Math.round(Number(inp.value) || 0)) : inp.value.trim();
+      });
+      p.amount = p.qty * p.unitPrice;
+    });
+  };
+  const recalc = () => {
+    collect();
+    $$('#b-rows tr[data-i]').forEach(tr => { tr.querySelector('.amt').textContent = fmtWon(rows[tr.dataset.i].amount); });
+    $('#b-summary').innerHTML = summaryHtml(budgetOf({ ...team, purchases: rows }));
+  };
+
+  const render = () => {
+    const plan = team.budget || [];
+    page(`
+      <div class="crumb"><a href="${isTeacher ? '#/budget' : `#/team/${team.id}`}">${isTeacher ? '예산' : '차시 기록'}</a> › ${esc(team.name)}</div>
+      <div class="page-head"><div><h1>예산 · 구매 내역</h1><p class="muted small">${esc(team.name)}${isTeacher ? '' : ' · 구매 내역은 선생님이 기록합니다.'}</p></div>
+        ${isTeacher ? '<div class="actions"><button class="btn-primary" id="b-save">저장</button></div>' : ''}</div>
+      <div id="b-summary">${summaryHtml(budgetOf({ ...team, purchases: rows }))}</div>
+
+      <div class="section-title"><h2>구매 내역</h2>
+        ${isTeacher ? `<div class="actions"><button class="btn-sm" id="b-add">＋ 항목 추가</button>${plan.length ? '<button class="btn-sm" id="b-import">계획서 예산에서 가져오기</button>' : ''}</div>` : ''}</div>
+      <div class="table-scroll"><table class="${isTeacher ? 'edit-table' : ''}">
+        <thead><tr><th>구매일</th><th>품목</th><th>용도</th><th class="num">수량</th><th class="num">단가</th><th class="num">금액</th><th>구매처</th><th>상태</th><th>비고</th>${isTeacher ? '<th></th>' : ''}</tr></thead>
+        <tbody id="b-rows">${rows.length ? rows.map(isTeacher ? editRow : viewRow).join('') : `<tr><td colspan="10" class="muted">아직 구매 내역이 없습니다.</td></tr>`}</tbody>
+      </table></div>
+      <p class="err" id="b-err"></p>
+
+      ${plan.length ? `
+        <div class="section-title"><h2>참고: 계획서 예산 (신청 당시)</h2></div>
+        <div class="table-scroll"><table>
+          <thead><tr><th>항목</th><th>용도</th><th>단가</th><th class="num">합계</th><th>구매처</th></tr></thead>
+          <tbody>${plan.map(p => `<tr><td>${esc(p.item)}</td><td>${esc(p.use)}</td><td>${esc(p.unit)}</td><td class="num">${fmtWon(p.total)}</td><td>${esc(p.vendor)}</td></tr>`).join('')}</tbody>
+        </table></div>` : ''}`, 'budget');
+
+    if (!isTeacher) return;
+    $('#b-rows').addEventListener('input', () => { recalc(); state.dirty = true; });
+    $('#b-rows').addEventListener('change', () => { recalc(); state.dirty = true; });
+    const change = fn => () => { collect(); fn(); render(); state.dirty = true; };
+    $('#b-add').onclick = change(() => rows.push({ date: todayStr(), item: '', use: '', qty: 1, unitPrice: 0, amount: 0, vendor: '', status: '구매예정', note: '' }));
+    if ($('#b-import')) {
+      $('#b-import').onclick = change(() => plan.forEach(p => rows.push({
+        date: '', item: p.item, use: p.use, qty: 1, unitPrice: p.total || 0, amount: p.total || 0, vendor: p.vendor, status: '구매예정', note: p.unit,
+      })));
+    }
+    $$('[data-del]').forEach(b => b.onclick = change(() => rows.splice(Number(b.dataset.del), 1)));
+    $('#b-save').onclick = async () => {
+      collect();
+      $('#b-save').disabled = true;
+      try {
+        await updateDoc(doc(db, 'teams', team.id), { purchases: rows.filter(p => p.item) });
+        state.dirty = false;
+        toast('구매 내역을 저장했습니다.');
+        route();
+      } catch (e) {
+        $('#b-err').textContent = friendlyError(e);
+        $('#b-save').disabled = false;
+      }
+    };
+  };
+  render();
 }
 
 // ---------- 계획서 보기 ----------
@@ -834,7 +1158,7 @@ async function renderInfo(teamId) {
       <tbody>${team.sessions.map(s => `<tr><td>${s.no}</td><td style="white-space:nowrap">${fmtDate(s.date)}</td><td>${esc(s.plan)}</td><td class="small">${esc(s.experiment) || '<span class="muted">-</span>'}</td></tr>`).join('')}</tbody>
     </table></div>
 
-    <div class="section-title"><h2>예산 사용 계획</h2></div>
+    <div class="section-title"><h2>예산 사용 계획</h2><span class="muted small">팀 한도 ${team.members.length}명 × ${fmtWon(BUDGET_PER_PERSON)} = <b>${fmtWon(team.members.length * BUDGET_PER_PERSON)}</b> · <a href="#/team/${team.id}/budget">구매 내역 보기</a></span></div>
     <div class="table-scroll"><table>
       <thead><tr><th>항목</th><th>용도</th><th>단가</th><th style="text-align:right">합계(원)</th><th>구매처</th></tr></thead>
       <tbody>${team.budget.length ? team.budget.map(b => `<tr><td>${esc(b.item)}</td><td>${esc(b.use)}</td><td>${esc(b.unit)}</td><td style="text-align:right">${won(b.total)}</td><td>${esc(b.vendor)}</td></tr>`).join('')

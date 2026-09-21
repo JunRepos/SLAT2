@@ -6,7 +6,9 @@ rules_version = '2';
 //
 // 컬렉션
 //  teams/{teamId}              계획서 (교사만 쓰기, 팀원 읽기)
-//  teams/{teamId}/logs/{no}    차시 기록 (팀원 작성, 교사 검토)
+//  teams/{teamId}/logs/{no}    차시 기록 (팀원 작성, 교사 검토·직접 작성)
+//  teams/{teamId}/attendance/{no}  교사 출결 체크 (팀원 읽기)
+//  (구매 내역은 teams/{teamId} 문서의 purchases 필드 — 교사만 쓰기)
 //  roster/{sid}                학번 → {name, teamId} (교사만 쓰기, 본인 읽기)
 //  pins/{sid}                  학번 → {pin} 접속코드 (교사만)
 //  links/{uid}                 로그인한 학생 기기 → {sid, pin, at}
@@ -77,6 +79,12 @@ service cloud.firestore {
     match /teams/{teamId} {
       allow read: if isTeacher() || isMember(teamId);
       allow write: if isTeacher();
+
+      // 교사가 체크하는 출결 {marks: {학번: '출석'|...}, notes, updatedAt}
+      match /attendance/{no} {
+        allow read: if isTeacher() || isMember(teamId);
+        allow write: if isTeacher();
+      }
 
       match /logs/{no} {
         allow read: if isTeacher() || isMember(teamId);
