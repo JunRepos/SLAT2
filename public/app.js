@@ -274,8 +274,9 @@ async function resolveMe(user) {
   try {
     await getDocs(query(collection(db, 'teams'), limit(1)));
     return { role: 'teacher', uid: user.uid, email: user.email };
-  } catch {
-    return { role: 'unauthorized', email: user.email };
+  } catch (e) {
+    console.error('교사 권한 확인 실패', e);
+    return { role: 'unauthorized', email: user.email, code: e.code || e.message };
   }
 }
 
@@ -370,10 +371,15 @@ function renderSetupNeeded() {
 }
 
 function renderUnauthorized() {
+  const { email, code } = state.me;
+  const denied = code === 'permission-denied';
   $app.innerHTML = `
     <div class="login-wrap"><div class="login-card">
-      <h1>권한 없음</h1>
-      <p class="muted">${esc(state.me.email)} 계정은 교사로 등록되어 있지 않습니다. <code>firestore.rules</code>의 교사 이메일 목록을 확인하세요.</p>
+      <h1>${denied ? '권한 없음' : '연결 오류'}</h1>
+      <p class="muted">${denied
+        ? `<b>${esc(email)}</b> 계정은 교사로 등록되어 있지 않습니다. Firebase 콘솔에 게시된 규칙의 교사 이메일 목록(<code>isTeacher</code>)에 이 이메일이 있는지 확인하세요.`
+        : `교사 권한을 확인하는 중 오류가 났습니다. 잠시 후 다시 시도하세요.`}</p>
+      <p class="small muted">로그인 계정: ${esc(email)} · 오류 코드: <code>${esc(code)}</code></p>
       <button class="btn-primary" id="out">다른 계정으로 로그인</button>
     </div></div>`;
   $('#out').onclick = logout;
