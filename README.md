@@ -4,7 +4,7 @@
 서버 없이 정적 파일(`public/`) + **Firebase (Authentication · Firestore)** 로 동작합니다.
 
 - 사이트: https://junrepos.github.io/SLAT2/ (`main`에 푸시하면 GitHub Actions가 `public/`을 Pages로 배포)
-- Firebase 프로젝트: `slat-9f875` (기존 SLAT 신청서 앱과 같은 프로젝트 — `firestore.rules`에 두 앱 규칙이 함께 있음)
+- Firebase 프로젝트: `slat2-d4240`
 - 보안 규칙 배포: `npx firebase-tools deploy --only firestore:rules`
 
 ## 기능

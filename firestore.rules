@@ -98,32 +98,5 @@ service cloud.firestore {
       }
     }
 
-    // ---- 기존 SLAT 신청서 앱(JunRepos/SLAT)용 규칙 — 같은 Firebase 프로젝트를 쓰므로 그대로 유지 ----
-    function isAdmin() {
-      return request.auth != null &&
-             request.auth.token.email == "chlwns1023@gmail.com";
-    }
-
-    match /submissions/{docId} {
-      allow read, delete: if isAdmin();
-      allow update: if false;
-
-      allow create: if
-        request.resource.data.studentId is string &&
-        request.resource.data.studentId.size() > 0 &&
-        request.resource.data.studentId.size() <= 30 &&
-        request.resource.data.name is string &&
-        request.resource.data.name.size() > 0 &&
-        request.resource.data.name.size() <= 50 &&
-        request.resource.data.get('team', '').size() <= 50 &&
-        request.resource.data.get('email', '').size() <= 100 &&
-        request.resource.data.get('q1', '').size() <= 5000 &&
-        request.resource.data.get('q2', '').size() <= 5000 &&
-        request.resource.data.get('q3', '').size() <= 5000 &&
-        request.resource.data.get('q4', '').size() <= 5000 &&
-        request.resource.data.get('q5', '').size() <= 5000 &&
-        request.resource.data.get('q6', '').size() <= 5000 &&
-        request.resource.data.get('storagePath', '').size() <= 500;
-    }
   }
 }
