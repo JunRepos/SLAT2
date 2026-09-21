@@ -1,0 +1,10 @@
+{
+  "name": "slat-logbook",
+  "version": "0.2.0",
+  "private": true,
+  "description": "학교주도활동(SLAT) 팀별 차시 기록 관리 — Firebase(Firestore) 정적 웹앱",
+  "scripts": {
+    "emulator": "npx -y firebase-tools@latest emulators:start --project demo-slat",
+    "deploy": "npx -y firebase-tools@latest deploy --only firestore:rules,hosting"
+  }
+}

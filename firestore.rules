@@ -1,0 +1,129 @@
+rules_version = '2';
+
+// SLAT 기록장 보안 규칙
+//  - 교사: Firebase Authentication 이메일/비밀번호 계정 (아래 목록의 이메일만)
+//  - 학생: 익명 로그인 후 links/{uid} 에 {학번, 접속코드}를 기록하면, 규칙이 pins/{학번}과 대조해 팀 권한을 준다.
+//
+// 컬렉션
+//  teams/{teamId}              계획서 (교사만 쓰기, 팀원 읽기)
+//  teams/{teamId}/logs/{no}    차시 기록 (팀원 작성, 교사 검토)
+//  roster/{sid}                학번 → {name, teamId} (교사만 쓰기, 본인 읽기)
+//  pins/{sid}                  학번 → {pin} 접속코드 (교사만)
+//  links/{uid}                 로그인한 학생 기기 → {sid, pin, at}
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ▼ 담당 교사 로그인 이메일로 바꾸세요. 여러 명이면 쉼표로 추가.
+    function isTeacher() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider == 'password'
+        && request.auth.token.email in ['chlwns1023@gmail.com'];
+    }
+
+    function hasLink() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/links/$(request.auth.uid));
+    }
+    function link() {
+      return get(/databases/$(database)/documents/links/$(request.auth.uid)).data;
+    }
+    // 교사가 접속코드를 바꾸면 기존 로그인은 즉시 무효가 된다.
+    function validLink() {
+      return hasLink()
+        && get(/databases/$(database)/documents/pins/$(link().sid)).data.pin == link().pin;
+    }
+    function self() {
+      return get(/databases/$(database)/documents/roster/$(link().sid)).data;
+    }
+    function isMember(teamId) {
+      return validLink() && self().teamId == teamId;
+    }
+
+    function studentKeys() {
+      return ['content', 'results', 'issues', 'nextPlan', 'references', 'attendance', 'contributions',
+              'status', 'rev', 'updatedAt', 'updatedBy', 'submittedAt', 'history'];
+    }
+    function text(d, k) {
+      return d.get(k, '') is string && d.get(k, '').size() <= 5000;
+    }
+    function studentLogOk(teamId, d) {
+      return isMember(teamId)
+        && d.updatedBy == link().sid + ' ' + self().name
+        && text(d, 'content') && text(d, 'results') && text(d, 'issues')
+        && text(d, 'nextPlan') && text(d, 'references')
+        && d.attendance is list && d.attendance.size() <= 20
+        && d.contributions is map
+        && d.history is list && d.history.size() <= 30;
+    }
+
+    match /links/{uid} {
+      allow read, delete: if request.auth != null && (request.auth.uid == uid || isTeacher());
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['sid', 'pin', 'at'])
+        && request.resource.data.sid is string
+        && get(/databases/$(database)/documents/pins/$(request.resource.data.sid)).data.pin == request.resource.data.pin;
+    }
+
+    match /pins/{sid} {
+      allow read, write: if isTeacher();
+    }
+
+    match /roster/{sid} {
+      allow read: if isTeacher() || (validLink() && link().sid == sid);
+      allow write: if isTeacher();
+    }
+
+    match /teams/{teamId} {
+      allow read: if isTeacher() || isMember(teamId);
+      allow write: if isTeacher();
+
+      match /logs/{no} {
+        allow read: if isTeacher() || isMember(teamId);
+        allow delete: if isTeacher();
+        allow create: if isTeacher() || (
+          studentLogOk(teamId, request.resource.data)
+          && request.resource.data.keys().hasOnly(studentKeys())
+          && request.resource.data.status in ['draft', 'submitted']
+          && request.resource.data.rev == 1
+        );
+        allow update: if isTeacher() || (
+          studentLogOk(teamId, request.resource.data)
+          && resource.data.status != 'approved'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(studentKeys())
+          && (request.resource.data.status in ['draft', 'submitted']
+              || request.resource.data.status == resource.data.status)
+          && request.resource.data.rev == resource.data.rev + 1
+        );
+      }
+    }
+
+    // ---- 기존 SLAT 신청서 앱(JunRepos/SLAT)용 규칙 — 같은 Firebase 프로젝트를 쓰므로 그대로 유지 ----
+    function isAdmin() {
+      return request.auth != null &&
+             request.auth.token.email == "chlwns1023@gmail.com";
+    }
+
+    match /submissions/{docId} {
+      allow read, delete: if isAdmin();
+      allow update: if false;
+
+      allow create: if
+        request.resource.data.studentId is string &&
+        request.resource.data.studentId.size() > 0 &&
+        request.resource.data.studentId.size() <= 30 &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.name.size() <= 50 &&
+        request.resource.data.get('team', '').size() <= 50 &&
+        request.resource.data.get('email', '').size() <= 100 &&
+        request.resource.data.get('q1', '').size() <= 5000 &&
+        request.resource.data.get('q2', '').size() <= 5000 &&
+        request.resource.data.get('q3', '').size() <= 5000 &&
+        request.resource.data.get('q4', '').size() <= 5000 &&
+        request.resource.data.get('q5', '').size() <= 5000 &&
+        request.resource.data.get('q6', '').size() <= 5000 &&
+        request.resource.data.get('storagePath', '').size() <= 500;
+    }
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+data/
+.firebase/
+*-debug.log
+.firebaserc
+
+# 이전 Node 서버 버전 (실명·전화번호 포함) — 삭제 전까지 올라가지 않도록
+/server.js
+/seed.js
+.claude/
