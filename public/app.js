@@ -104,6 +104,7 @@ function friendlyError(e) {
     'auth/wrong-password': '비밀번호가 올바르지 않습니다.',
     'auth/too-many-requests': '시도가 너무 많습니다. 잠시 후 다시 시도하세요.',
     'auth/operation-not-allowed': 'Firebase 콘솔에서 해당 로그인 방식(익명/이메일)이 꺼져 있습니다.',
+    'auth/configuration-not-found': 'Firebase 콘솔에서 Authentication이 아직 설정되지 않았습니다. (Authentication → 시작하기)',
     'auth/network-request-failed': '네트워크에 연결할 수 없습니다.',
     'auth/weak-password': '비밀번호는 6자 이상이어야 합니다.',
     'permission-denied': '권한이 없습니다. 다시 로그인해 주세요.',
