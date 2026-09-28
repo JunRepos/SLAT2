@@ -142,6 +142,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chip { background: var(--surface-2); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
 .chip b { font-weight: 700; }
+.chip-warn { background: var(--st-revise-bg); color: var(--st-revise-fg); }
 .progress { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; display: flex; margin-top: 6px; }
 .progress span { display: block; height: 100%; }
 .progress-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-top: 16px; }

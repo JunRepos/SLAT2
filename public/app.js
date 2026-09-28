@@ -309,7 +309,7 @@ async function studentLogin(sid, name) {
     try {
       await setDoc(doc(db, 'links', uid), { sid, name, at: new Date().toISOString() });
     } catch (e) {
-      if (e.code === 'permission-denied') throw new Error('학번과 이름이 팀 명단과 일치하지 않습니다. 담당 선생님께 확인하세요.');
+      if (e.code === 'permission-denied') throw new Error('학번과 이름이 선생님이 등록한 명단과 다릅니다. 명단에 어떻게 적혀 있는지 선생님께 확인하세요.');
       throw e;
     }
     const r = await getDoc(doc(db, 'roster', sid));
@@ -511,6 +511,9 @@ async function renderDashboard() {
     }
   }
 
+  // 불러온 직후의 가려진 이름(김0현)은 학생 로그인과 맞지 않으므로 알려 준다.
+  const masked = teams.flatMap(t => t.members.filter(m => m.name.includes('0')).map(m => ({ t, m })));
+
   const rows = teams.map(t => {
     const cells = [];
     for (let no = 1; no <= maxNo; no++) {
@@ -538,6 +541,11 @@ async function renderDashboard() {
       </div>
     </div>
 
+    ${masked.length ? `<div class="feedback-box revise" style="margin-bottom:16px">
+      <b>⚠ 이름이 가려진 팀원이 ${masked.length}명 있습니다 — 학생이 로그인할 수 없습니다</b>
+      <div class="small" style="margin-top:4px">${masked.map(({ t, m }) => `${esc(t.name)} ${esc(m.sid)} <b>${esc(m.name)}</b>`).join(' · ')}</div>
+      <div class="small" style="margin-top:6px">학생은 명단에 적힌 이름 그대로 입력해야 들어옵니다. 각 팀 <b>[계획서 편집]</b>에서 실명(과 실제 학번)으로 고쳐 주세요.</div>
+    </div>` : ''}
     <div class="stats">
       <div class="stat"><div class="num">${teams.length}<small> 팀</small></div><div class="lbl">참여 학생 ${teams.reduce((n, t) => n + t.members.length, 0)}명</div></div>
       <div class="stat"><div class="num">${done}<small> / ${due}</small></div><div class="lbl">지금까지 도래한 차시 중 제출</div></div>
@@ -1258,9 +1266,12 @@ async function renderPins() {
     .map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
   const url = location.origin + location.pathname;
+  // 로그인은 roster 문서와 대조하므로, 실제 로그인에 쓰이는 값을 그대로 보여 준다.
+  const roster = {};
+  (await getDocs(collection(db, 'roster'))).forEach(d => { roster[d.id] = d.data(); });
   page(`
     <div class="page-head no-print">
-      <div><h1>학생 접속 안내</h1><p class="muted small">학생은 아래 주소에서 <b>학번과 이름</b>을 입력하면 들어옵니다. 인쇄해서 나눠 주거나 화면으로 보여 주세요.</p></div>
+      <div><h1>학생 접속 안내</h1><p class="muted small">학생은 아래 주소에서 <b>학번과 이름</b>을 입력하면 들어옵니다. 아래 적힌 값과 <b>똑같이</b> 입력해야 로그인됩니다.</p></div>
       <div class="actions"><button class="btn-primary" onclick="window.print()">🖨 인쇄</button></div>
     </div>
     <div class="card qr-card">
@@ -1277,7 +1288,11 @@ async function renderPins() {
     </div>
     ${teams.map(t => `
       <div class="section-title"><h2>${esc(t.name)}</h2></div>
-      <div class="chips">${t.members.map(m => `<span class="chip"><b>${esc(m.sid)}</b> ${esc(m.name)}</span>`).join('') || '<span class="muted">팀원 없음</span>'}</div>`).join('')}
+      <div class="chips">${t.members.map(m => {
+        const r = roster[m.sid];
+        const bad = !r ? '명단 없음' : r.name !== m.name ? `로그인 이름: ${r.name}` : '';
+        return `<span class="chip ${bad ? 'chip-warn' : ''}"><b>${esc(m.sid)}</b> ${esc(m.name)}${bad ? ` ⚠ ${esc(bad)}` : ''}</span>`;
+      }).join('') || '<span class="muted">팀원 없음</span>'}</div>`).join('')}
     <p class="small muted no-print" style="margin-top:20px">※ 접속코드 없이 명단의 학번·이름으로 들어갑니다. 같은 반 학생은 서로 알 수 있으니, 기록은 선생님이 확인해 주세요.</p>`, 'pins');
 }
 
