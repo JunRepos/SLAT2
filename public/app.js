@@ -743,7 +743,7 @@ async function renderLog(teamId, no, editMode = false) {
         ${feedback}
         ${isTeacher ? '<p class="small muted" style="margin-top:0">✏ 선생님이 작성하는 중입니다. 수정자는 ‘담당 교사’로 기록됩니다.</p>' : ''}
         <div class="field"><label for="content">오늘 한 활동 <span class="hint">무엇을, 어떻게 했는지 적어 주세요</span></label>
-          <textarea id="content" rows="10" placeholder="예) 게임 몰입도를 결정하는 요인을 선행 연구 3편에서 조사하고, 팀원별로 담당 분야와 연결해 정리했다.">${esc(log.content)}</textarea></div>
+          <textarea id="content" rows="10">${esc(log.content)}</textarea></div>
         <div class="form-actions">
           ${isTeacher
             ? `<span class="grow">저장만 하면 상태는 그대로 유지됩니다.</span>
