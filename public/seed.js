@@ -1,6 +1,6 @@
 // 제출된 주제 탐구 프로젝트 계획서를 옮긴 초기 데이터 (교사 화면 [초기 데이터 불러오기]에서 사용).
-// 공개 저장소용으로 이름은 가운데 글자를 0으로 가렸고 전화번호는 넣지 않았다.
-// 불러온 뒤 교사 화면 [계획서 편집]에서 실명으로 고치면 실명은 Firestore에만 저장된다.
+// 공개 저장소용으로 학번은 가짜 값(A01…)으로, 이름은 가운데 글자를 0으로 가렸고 전화번호는 넣지 않았다.
+// 불러온 뒤 교사 화면 [계획서 편집]에서 실제 학번·이름으로 고치면, 실제 값은 Firestore에만 저장된다.
 
 export const DATES = [
   '2026-09-07', '2026-09-14', '2026-09-21', '2026-09-28',
@@ -24,12 +24,12 @@ export const SEED_TEAMS = [
     purpose: '하나의 게임이 완성되어 사용자에게 전달되는 전체 과정을 스토리 기획, 그래픽 처리, 하드웨어 입력 세 분야로 나누어 융합 탐구한 종합적인 이해를 도모',
     place: '컴퓨터실1',
     time: '월요일 7교시',
-    leaderSid: '10709',
+    leaderSid: 'A01',
     caution: '저작권을 확실히 명시한다. 장비 파손에 주의한다.',
     members: [
-      { sid: '10709', name: '김0현', role: '하드웨어 입력' },
-      { sid: '10817', name: '이0안', role: '그래픽 처리' },
-      { sid: '10902', name: '권0재', role: '스토리 기획' },
+      { sid: 'A01', name: '김0현', role: '하드웨어 입력' },
+      { sid: 'A02', name: '이0안', role: '그래픽 처리' },
+      { sid: 'A03', name: '권0재', role: '스토리 기획' },
     ],
     sessions: makeSessions([
       '팀 주제 확정 및 의견 공유, 활동 계획 정하기',
@@ -51,12 +51,12 @@ export const SEED_TEAMS = [
     purpose: '다양한 소재의 화분을 비교하고 여러 센서(아두이노)를 활용해 식물 생육에 적합한 스마트 화분을 개발한다.',
     place: '컴퓨터실1',
     time: '월요일 7교시',
-    leaderSid: '20502',
+    leaderSid: 'B02',
     caution: '',
     members: [
-      { sid: '20501', name: '강0승', role: '' },
-      { sid: '20502', name: '권0성', role: '' },
-      { sid: '20515', name: '이0호', role: '' },
+      { sid: 'B01', name: '강0승', role: '' },
+      { sid: 'B02', name: '권0성', role: '' },
+      { sid: 'B03', name: '이0호', role: '' },
     ],
     sessions: makeSessions([
       '문제 상황 및 탐구 방향 설정',
@@ -80,14 +80,14 @@ export const SEED_TEAMS = [
     purpose: '물리적 회로 특성과 화학적 이온 반응을 결합하여 커패시터의 전하 저장 기전을 융합적으로 탐구하고자 함.',
     place: '스팀1',
     time: '월요일 7교시',
-    leaderSid: '11202',
+    leaderSid: 'C04',
     caution: '',
     members: [
-      { sid: '10102', name: '김0별', role: '' },
-      { sid: '10104', name: '김0우', role: '' },
-      { sid: '10115', name: '유0원', role: '' },
-      { sid: '11202', name: '권0하', role: '' },
-      { sid: '10128', name: '배0현', role: '' },
+      { sid: 'C01', name: '김0별', role: '' },
+      { sid: 'C02', name: '김0우', role: '' },
+      { sid: 'C03', name: '유0원', role: '' },
+      { sid: 'C04', name: '권0하', role: '' },
+      { sid: 'C05', name: '배0현', role: '' },
     ],
     sessions: makeSessions([
       '커패시터와 배터리의 구조적 차이 설명 및 아두이노 전압 측정 회로 기초 구성',

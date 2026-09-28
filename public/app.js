@@ -300,16 +300,16 @@ async function resolveMe(user) {
   }
 }
 
-async function studentLogin(sid) {
+async function studentLogin(sid, name) {
   state.linking = true;
   try {
     if (auth.currentUser && !auth.currentUser.isAnonymous) await signOut(auth);
     if (!auth.currentUser) await signInAnonymously(auth);
     const uid = auth.currentUser.uid;
     try {
-      await setDoc(doc(db, 'links', uid), { sid, at: new Date().toISOString() });
+      await setDoc(doc(db, 'links', uid), { sid, name, at: new Date().toISOString() });
     } catch (e) {
-      if (e.code === 'permission-denied') throw new Error('명단에 없는 학번입니다. 담당 선생님께 확인하세요.');
+      if (e.code === 'permission-denied') throw new Error('학번과 이름이 팀 명단과 일치하지 않습니다. 담당 선생님께 확인하세요.');
       throw e;
     }
     const r = await getDoc(doc(db, 'roster', sid));
@@ -422,6 +422,7 @@ function renderLogin() {
       </div>
       <form id="f-student">
         <div class="field"><label for="sid">학번</label><input type="text" id="sid" inputmode="numeric" autocomplete="off" required></div>
+        <div class="field"><label for="sname">이름</label><input type="text" id="sname" autocomplete="off" required></div>
         <button class="btn-primary" type="submit">로그인</button>
       </form>
       <form id="f-teacher" hidden>
@@ -454,7 +455,7 @@ function renderLogin() {
   $('#f-student').onsubmit = e => {
     e.preventDefault();
     run(e.target, async () => {
-      await studentLogin($('#sid').value.trim());
+      await studentLogin($('#sid').value.trim(), $('#sname').value.trim());
       location.hash = `#/team/${state.me.teamId}`;
       route();
     });
@@ -1200,7 +1201,7 @@ async function renderEdit(teamId) {
           </div>
         </div>
 
-        <div class="section-title"><h2>팀원</h2><span class="muted small">학생은 여기 적힌 <b>학번</b>으로 로그인합니다. 명단에서 빼면 그 학생은 들어올 수 없습니다.</span></div>
+        <div class="section-title"><h2>팀원</h2><span class="muted small">학생은 여기 적힌 <b>학번 + 이름</b>으로 로그인합니다. 이름을 고치거나 명단에서 빼면 그 학생의 기존 로그인은 끊깁니다.</span></div>
         <div class="table-scroll"><table class="edit-table">
           <thead><tr><th>팀장</th><th>학번</th><th>이름</th><th>역할</th><th></th></tr></thead>
           <tbody id="members">${memberRows()}</tbody></table></div>
@@ -1259,7 +1260,7 @@ async function renderPins() {
   const url = location.origin + location.pathname;
   page(`
     <div class="page-head no-print">
-      <div><h1>학생 접속 안내</h1><p class="muted small">학생은 아래 주소에서 <b>학번</b>만 입력하면 들어옵니다. 인쇄해서 나눠 주거나 화면으로 보여 주세요.</p></div>
+      <div><h1>학생 접속 안내</h1><p class="muted small">학생은 아래 주소에서 <b>학번과 이름</b>을 입력하면 들어옵니다. 인쇄해서 나눠 주거나 화면으로 보여 주세요.</p></div>
       <div class="actions"><button class="btn-primary" onclick="window.print()">🖨 인쇄</button></div>
     </div>
     <div class="card qr-card">
@@ -1268,7 +1269,7 @@ async function renderPins() {
         <h2>휴대폰으로 접속하기</h2>
         <ol class="qr-steps">
           <li>카메라로 QR 코드를 찍습니다.</li>
-          <li>학번을 입력하고 [로그인]을 누릅니다.</li>
+          <li>학번과 이름을 입력하고 [로그인]을 누릅니다.</li>
           <li>차시를 골라 그날 한 활동을 적고 [제출]합니다.</li>
         </ol>
         <p class="qr-url">${esc(url)}</p>
@@ -1277,7 +1278,7 @@ async function renderPins() {
     ${teams.map(t => `
       <div class="section-title"><h2>${esc(t.name)}</h2></div>
       <div class="chips">${t.members.map(m => `<span class="chip"><b>${esc(m.sid)}</b> ${esc(m.name)}</span>`).join('') || '<span class="muted">팀원 없음</span>'}</div>`).join('')}
-    <p class="small muted no-print" style="margin-top:20px">※ 접속코드 없이 학번만으로 들어갑니다. 남의 학번으로도 들어갈 수 있으니, 기록은 선생님이 확인해 주세요.</p>`, 'pins');
+    <p class="small muted no-print" style="margin-top:20px">※ 접속코드 없이 명단의 학번·이름으로 들어갑니다. 같은 반 학생은 서로 알 수 있으니, 기록은 선생님이 확인해 주세요.</p>`, 'pins');
 }
 
 // ---------- 설정 (교사) ----------

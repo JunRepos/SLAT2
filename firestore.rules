@@ -2,8 +2,8 @@ rules_version = '2';
 
 // SLAT 기록장 보안 규칙
 //  - 교사: Firebase Authentication 이메일/비밀번호 계정 (아래 목록의 이메일만)
-//  - 학생: 익명 로그인 후 links/{uid} 에 학번을 기록하면, 규칙이 roster/{학번}과 대조해 그 팀 권한만 준다.
-//    (접속코드 없이 학번만으로 들어오므로, 남의 학번으로 들어오는 것은 막지 못한다.)
+//  - 학생: 익명 로그인 후 links/{uid} 에 학번·이름을 기록하면, 규칙이 roster/{학번}과 대조해 그 팀 권한만 준다.
+//    (접속코드 없이 학번+이름으로 들어오므로, 이름을 아는 사람은 대신 들어올 수 있다.)
 //
 // 컬렉션
 //  teams/{teamId}              계획서 (교사만 쓰기, 팀원 읽기)
@@ -11,7 +11,7 @@ rules_version = '2';
 //  teams/{teamId}/attendance/{no}  교사 출결 체크 (팀원 읽기)
 //  (구매 내역은 teams/{teamId} 문서의 purchases 필드 — 교사만 쓰기)
 //  roster/{sid}                학번 → {name, teamId} (교사만 쓰기, 본인 읽기)
-//  links/{uid}                 로그인한 학생 기기 → {sid, at}
+//  links/{uid}                 로그인한 학생 기기 → {sid, name, at}
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -30,10 +30,11 @@ service cloud.firestore {
     function link() {
       return get(/databases/$(database)/documents/links/$(request.auth.uid)).data;
     }
-    // 명단(roster)에 있는 학번이어야 유효한 로그인. 명단에서 빼면 즉시 무효가 된다.
+    // 명단(roster)의 학번·이름과 맞아야 유효한 로그인.
+    // 교사가 이름을 고치거나 명단에서 빼면 그 학생의 기존 로그인은 즉시 무효가 된다.
     function validLink() {
       return hasLink()
-        && exists(/databases/$(database)/documents/roster/$(link().sid));
+        && get(/databases/$(database)/documents/roster/$(link().sid)).data.name == link().name;
     }
     function self() {
       return get(/databases/$(database)/documents/roster/$(link().sid)).data;
@@ -62,9 +63,9 @@ service cloud.firestore {
     match /links/{uid} {
       allow read, delete: if request.auth != null && (request.auth.uid == uid || isTeacher());
       allow create, update: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['sid', 'at'])
+        && request.resource.data.keys().hasOnly(['sid', 'name', 'at'])
         && request.resource.data.sid is string
-        && exists(/databases/$(database)/documents/roster/$(request.resource.data.sid));
+        && get(/databases/$(database)/documents/roster/$(request.resource.data.sid)).data.name == request.resource.data.name;
     }
 
     match /roster/{sid} {
