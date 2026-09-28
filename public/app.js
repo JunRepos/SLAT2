@@ -421,7 +421,7 @@ function renderLogin() {
         <button class="tab" data-tab="teacher">교사</button>
       </div>
       <form id="f-student">
-        <div class="field"><label for="sid">학번 <span class="hint">예: 10709</span></label><input type="text" id="sid" inputmode="numeric" autocomplete="off" placeholder="10709" required></div>
+        <div class="field"><label for="sid">학번</label><input type="text" id="sid" inputmode="numeric" autocomplete="off" required></div>
         <button class="btn-primary" type="submit">로그인</button>
       </form>
       <form id="f-teacher" hidden>
