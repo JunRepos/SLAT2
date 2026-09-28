@@ -253,6 +253,11 @@ td.over, .over b { color: var(--danger); }
 .budget-bar { height: 10px; margin-top: 0; }
 
 /* ---------- 접속코드 카드 ---------- */
+.qr-card { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.qr-card img { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.qr-steps { margin: 8px 0; padding-left: 20px; }
+.qr-steps li { margin-bottom: 2px; }
+.qr-url { font-weight: 700; word-break: break-all; margin: 10px 0 0; }
 .pin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .pin-card { background: var(--surface); border: 1px dashed #b9b6ab; border-radius: 8px; padding: 14px 16px; break-inside: avoid; }
 .pin-code { font-family: ui-monospace, Consolas, monospace; font-size: 26px; font-weight: 800; letter-spacing: 3px; margin: 6px 0; }

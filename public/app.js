@@ -44,7 +44,6 @@ const DONE = ['submitted', 'revise', 'approved'];
 const LOG_TEXT_FIELDS = ['content', 'results', 'issues', 'nextPlan', 'references'];
 const ATT_MARKS = ['출석', '지각', '조퇴', '결석', '공결'];
 const BUDGET_PER_PERSON = 25000;
-const PIN_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
 
 // ---------- 공통 도우미 ----------
 
@@ -114,11 +113,6 @@ function won(n) {
   return n ? Number(n).toLocaleString('ko-KR') : '';
 }
 
-function genPin() {
-  const buf = crypto.getRandomValues(new Uint32Array(6));
-  return [...buf].map(n => PIN_CHARS[n % PIN_CHARS.length]).join('');
-}
-
 function friendlyError(e) {
   const map = {
     'auth/invalid-credential': '이메일 또는 비밀번호가 올바르지 않습니다.',
@@ -140,6 +134,12 @@ window.addEventListener('beforeunload', e => {
 });
 
 // ---------- 데이터 ----------
+
+// 학생이 새 기록을 만들 때의 기본값 (보안 규칙이 허용하는 필드만)
+const studentDefaults = () => ({
+  content: '', results: '', issues: '', nextPlan: '', references: '',
+  attendance: [], contributions: {}, history: [],
+});
 
 const emptyLog = () => ({
   status: 'empty', rev: 0,
@@ -197,7 +197,7 @@ async function saveLog(team, no, action, fields, baseRev) {
     if (curRev !== baseRev) throw new Error('다른 팀원(또는 선생님)이 먼저 이 기록을 수정했습니다. 내용을 복사해 두고 새로고침한 뒤 다시 저장하세요.');
     const now = new Date().toISOString();
     const next = {
-      ...(cur || {}),
+      ...(cur || studentDefaults()),
       ...fields,
       rev: curRev + 1,
       updatedAt: now,
@@ -236,23 +236,13 @@ async function setLogStatus(teamId, no, status, feedback, assignee) {
   });
 }
 
-async function fetchPins(sids) {
-  const pins = {};
-  await Promise.all(sids.map(async sid => {
-    const s = await getDoc(doc(db, 'pins', sid));
-    pins[sid] = s.exists() ? s.data().pin : '';
-  }));
-  return pins;
-}
-
-// 계획서 저장: 팀 문서 + 로그인 명단(roster) + 접속코드(pins)를 한 번에 쓴다.
-async function saveTeam(oldTeam, draft, pins) {
+// 계획서 저장: 팀 문서와 로그인 명단(roster)을 한 번에 쓴다.
+async function saveTeam(oldTeam, draft) {
   const sids = new Set();
   for (const m of draft.members) {
     if (!/^[0-9A-Za-z-]{1,20}$/.test(m.sid)) throw new Error(`학번 '${m.sid}'이(가) 올바르지 않습니다.`);
     if (!m.name) throw new Error(`학번 ${m.sid}의 이름을 입력하세요.`);
     if (sids.has(m.sid)) throw new Error(`학번 ${m.sid}이(가) 중복되었습니다.`);
-    if (!/^[a-z0-9]{4,20}$/.test(pins[m.sid] || '')) throw new Error(`${m.name}의 접속코드는 영문 소문자·숫자 4자 이상이어야 합니다.`);
     sids.add(m.sid);
   }
   await Promise.all([...sids].map(async sid => {
@@ -269,13 +259,9 @@ async function saveTeam(oldTeam, draft, pins) {
   });
   for (const m of draft.members) {
     batch.set(doc(db, 'roster', m.sid), { name: m.name, teamId: oldTeam.id });
-    batch.set(doc(db, 'pins', m.sid), { pin: pins[m.sid] });
   }
   for (const old of oldTeam.members) {
-    if (!sids.has(old.sid)) {
-      batch.delete(doc(db, 'roster', old.sid));
-      batch.delete(doc(db, 'pins', old.sid));
-    }
+    if (!sids.has(old.sid)) batch.delete(doc(db, 'roster', old.sid));
   }
   await batch.commit();
 }
@@ -285,10 +271,7 @@ async function importSeed() {
   SEED_TEAMS.forEach((t, i) => {
     const { id, ...data } = t;
     batch.set(doc(db, 'teams', id), { ...data, order: i + 1 });
-    for (const m of t.members) {
-      batch.set(doc(db, 'roster', m.sid), { name: m.name, teamId: id });
-      batch.set(doc(db, 'pins', m.sid), { pin: genPin() });
-    }
+    for (const m of t.members) batch.set(doc(db, 'roster', m.sid), { name: m.name, teamId: id });
   });
   await batch.commit();
 }
@@ -317,16 +300,16 @@ async function resolveMe(user) {
   }
 }
 
-async function studentLogin(sid, pin) {
+async function studentLogin(sid) {
   state.linking = true;
   try {
     if (auth.currentUser && !auth.currentUser.isAnonymous) await signOut(auth);
     if (!auth.currentUser) await signInAnonymously(auth);
     const uid = auth.currentUser.uid;
     try {
-      await setDoc(doc(db, 'links', uid), { sid, pin, at: new Date().toISOString() });
+      await setDoc(doc(db, 'links', uid), { sid, at: new Date().toISOString() });
     } catch (e) {
-      if (e.code === 'permission-denied') throw new Error('학번 또는 접속코드가 올바르지 않습니다. 담당 선생님께 확인하세요.');
+      if (e.code === 'permission-denied') throw new Error('명단에 없는 학번입니다. 담당 선생님께 확인하세요.');
       throw e;
     }
     const r = await getDoc(doc(db, 'roster', sid));
@@ -353,7 +336,7 @@ async function logout() {
 function page(html, active) {
   const me = state.me;
   const links = me.role === 'teacher'
-    ? [['dashboard', '#/dashboard', '대시보드'], ['attendance', '#/attendance', '출결'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속코드'], ['settings', '#/settings', '설정']]
+    ? [['dashboard', '#/dashboard', '대시보드'], ['attendance', '#/attendance', '출결'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속 안내'], ['settings', '#/settings', '설정']]
     : [['team', `#/team/${me.teamId}`, '차시 기록'], ['budget', `#/team/${me.teamId}/budget`, '예산'], ['info', `#/team/${me.teamId}/info`, '우리 팀 계획서']];
   $app.innerHTML = `
     <header class="topbar"><div class="wrap topbar-in">
@@ -438,8 +421,7 @@ function renderLogin() {
         <button class="tab" data-tab="teacher">교사</button>
       </div>
       <form id="f-student">
-        <div class="field"><label for="sid">학번</label><input type="text" id="sid" inputmode="numeric" autocomplete="off" placeholder="예: 10709" required></div>
-        <div class="field"><label for="spin">접속코드 <span class="hint">선생님께 받은 6자리</span></label><input type="text" id="spin" autocomplete="off" autocapitalize="off" spellcheck="false" required></div>
+        <div class="field"><label for="sid">학번 <span class="hint">예: 10709</span></label><input type="text" id="sid" inputmode="numeric" autocomplete="off" placeholder="10709" required></div>
         <button class="btn-primary" type="submit">로그인</button>
       </form>
       <form id="f-teacher" hidden>
@@ -472,7 +454,7 @@ function renderLogin() {
   $('#f-student').onsubmit = e => {
     e.preventDefault();
     run(e.target, async () => {
-      await studentLogin($('#sid').value.trim(), $('#spin').value.trim().toLowerCase());
+      await studentLogin($('#sid').value.trim());
       location.hash = `#/team/${state.me.teamId}`;
       route();
     });
@@ -751,22 +733,8 @@ async function renderLog(teamId, no, editMode = false) {
       <form class="card" id="log-form">
         ${feedback}
         ${isTeacher ? '<p class="small muted" style="margin-top:0">✏ 선생님이 작성하는 중입니다. 수정자는 ‘담당 교사’로 기록됩니다.</p>' : ''}
-        <div class="field"><label>참여자 <span class="hint">오늘 활동에 참여한 팀원을 모두 체크</span></label>
-          <div class="attend">${team.members.map(m => `<label><input type="checkbox" name="att" value="${esc(m.sid)}" ${log.attendance.includes(m.sid) ? 'checked' : ''}>${esc(m.name)}</label>`).join('')}</div></div>
-        <div class="field"><label for="content">오늘 한 활동 <span class="hint">필수 · 무엇을, 어떻게 했는지 구체적으로</span></label>
-          <textarea id="content" rows="6" placeholder="예) 게임 몰입도를 결정하는 요인을 선행 연구 3편에서 조사하고, 팀원별로 담당 분야와 연결해 정리했다.">${esc(log.content)}</textarea></div>
-        <div class="field"><label>개인별 역할·기여 <span class="hint">각자 맡은 일</span></label>
-          <div class="contrib">${team.members.map(m => `
-            <div class="contrib-row"><div class="nm">${esc(m.name)}${m.role ? `<small>${esc(m.role)}</small>` : ''}</div>
-            <textarea data-sid="${esc(m.sid)}" rows="2">${esc(log.contributions[m.sid] || '')}</textarea></div>`).join('')}</div></div>
-        <div class="field"><label for="results">결과·산출물 <span class="hint">측정값, 정리한 자료, 만든 것 등</span></label>
-          <textarea id="results" rows="4">${esc(log.results)}</textarea></div>
-        <div class="two-col">
-          <div class="field"><label for="issues">어려웠던 점과 해결 방법</label><textarea id="issues" rows="3">${esc(log.issues)}</textarea></div>
-          <div class="field"><label for="nextPlan">다음 차시 계획</label><textarea id="nextPlan" rows="3">${esc(log.nextPlan)}</textarea></div>
-        </div>
-        <div class="field"><label for="references">참고자료·출처 <span class="hint">책·논문·웹사이트 주소 등 (저작권 표기)</span></label>
-          <textarea id="references" rows="2">${esc(log.references)}</textarea></div>
+        <div class="field"><label for="content">오늘 한 활동 <span class="hint">무엇을, 어떻게 했는지 적어 주세요</span></label>
+          <textarea id="content" rows="10" placeholder="예) 게임 몰입도를 결정하는 요인을 선행 연구 3편에서 조사하고, 팀원별로 담당 분야와 연결해 정리했다.">${esc(log.content)}</textarea></div>
         <div class="form-actions">
           ${isTeacher
             ? `<span class="grow">저장만 하면 상태는 그대로 유지됩니다.</span>
@@ -791,13 +759,13 @@ async function renderLog(teamId, no, editMode = false) {
           ${isTeacher ? '' : feedback}
           ${!isTeacher && log.status === 'approved' ? '<p class="muted small">✅ 선생님 확인이 끝난 기록입니다. 수정이 필요하면 선생님께 말씀드리세요.</p>' : ''}
           ${written ? `
-            ${block('참여자', log.attendance.map(nameOf).join(', '))}
             ${block('오늘 한 활동', log.content)}
-            ${block('개인별 역할·기여', contribs)}
-            ${block('결과·산출물', log.results)}
-            ${block('어려웠던 점과 해결 방법', log.issues)}
-            ${block('다음 차시 계획', log.nextPlan)}
-            ${block('참고자료·출처', log.references)}` : '<p class="muted">아직 작성된 내용이 없습니다.</p>'}
+            ${log.attendance.length ? block('참여자', log.attendance.map(nameOf).join(', ')) : ''}
+            ${contribs ? block('개인별 역할·기여', contribs) : ''}
+            ${log.results ? block('결과·산출물', log.results) : ''}
+            ${log.issues ? block('어려웠던 점과 해결 방법', log.issues) : ''}
+            ${log.nextPlan ? block('다음 차시 계획', log.nextPlan) : ''}
+            ${log.references ? block('참고자료·출처', log.references) : ''}` : '<p class="muted">아직 작성된 내용이 없습니다.</p>'}
           ${log.history?.length ? `<details><summary class="small muted">변경 이력 (${log.history.length})</summary><ul class="history">${log.history.map(h => `<li>${fmtDateTime(h.at)} · ${esc(h.by)} · ${esc(h.action)}</li>`).join('')}</ul></details>` : ''}
         </div>
         ${isTeacher ? `
@@ -829,14 +797,7 @@ async function renderLog(teamId, no, editMode = false) {
   if (editable) {
     const form = $('#log-form');
     form.addEventListener('input', () => { state.dirty = true; });
-    const collect = () => {
-      const fields = {
-        attendance: $$('input[name=att]:checked').map(i => i.value),
-        contributions: Object.fromEntries($$('textarea[data-sid]').map(t => [t.dataset.sid, t.value.slice(0, 1000)])),
-      };
-      for (const k of LOG_TEXT_FIELDS) fields[k] = $(`#${k}`).value.slice(0, 5000);
-      return fields;
-    };
+    const collect = () => ({ content: $('#content').value.slice(0, 5000) });
     const save = async action => {
       $('#log-err').textContent = '';
       if (action === 'submit' && !$('#content').value.trim()) {
@@ -1172,8 +1133,6 @@ async function renderInfo(teamId) {
 async function renderEdit(teamId) {
   const { team } = await fetchTeam(teamId);
   const draft = structuredClone(team);
-  const pins = await fetchPins(team.members.map(m => m.sid));
-  draft.members.forEach(m => { m.pin = pins[m.sid] || genPin(); });
 
   const memberRows = () => draft.members.map((m, i) => `
     <tr data-i="${i}">
@@ -1181,7 +1140,6 @@ async function renderEdit(teamId) {
       <td style="width:110px"><input type="text" data-m="sid" value="${esc(m.sid)}" placeholder="학번"></td>
       <td style="width:120px"><input type="text" data-m="name" value="${esc(m.name)}" placeholder="이름"></td>
       <td><input type="text" data-m="role" value="${esc(m.role)}" placeholder="역할·담당 분야"></td>
-      <td style="width:150px"><div style="display:flex;gap:4px"><input type="text" data-m="pin" value="${esc(m.pin)}" spellcheck="false"><button type="button" class="btn-sm" data-regen="${i}" title="새 접속코드">↻</button></div></td>
       <td style="width:60px"><button type="button" class="btn-sm btn-danger" data-del-member="${i}">삭제</button></td>
     </tr>`).join('');
 
@@ -1209,7 +1167,7 @@ async function renderEdit(teamId) {
     $$('#members tr[data-i]').forEach(tr => {
       const m = draft.members[tr.dataset.i];
       tr.querySelectorAll('[data-m]').forEach(inp => {
-        m[inp.dataset.m] = inp.dataset.m === 'pin' ? inp.value.trim().toLowerCase() : inp.value.trim();
+        m[inp.dataset.m] = inp.value.trim();
       });
     });
     const leaderIdx = $('input[name=leader]:checked')?.value;
@@ -1242,9 +1200,9 @@ async function renderEdit(teamId) {
           </div>
         </div>
 
-        <div class="section-title"><h2>팀원</h2><span class="muted small">학생은 <b>학번 + 접속코드</b>로 로그인합니다. 접속코드를 바꾸면 그 학생의 기존 로그인은 끊깁니다.</span></div>
+        <div class="section-title"><h2>팀원</h2><span class="muted small">학생은 여기 적힌 <b>학번</b>으로 로그인합니다. 명단에서 빼면 그 학생은 들어올 수 없습니다.</span></div>
         <div class="table-scroll"><table class="edit-table">
-          <thead><tr><th>팀장</th><th>학번</th><th>이름</th><th>역할</th><th>접속코드</th><th></th></tr></thead>
+          <thead><tr><th>팀장</th><th>학번</th><th>이름</th><th>역할</th><th></th></tr></thead>
           <tbody id="members">${memberRows()}</tbody></table></div>
         <p><button type="button" class="btn-sm" id="add-member">＋ 팀원 추가</button></p>
 
@@ -1269,9 +1227,8 @@ async function renderEdit(teamId) {
 
     const change = fn => () => { collect(); fn(); render(); state.dirty = true; };
     $('#edit-form').addEventListener('input', () => { state.dirty = true; });
-    $('#add-member').onclick = change(() => draft.members.push({ sid: '', name: '', role: '', pin: genPin() }));
+    $('#add-member').onclick = change(() => draft.members.push({ sid: '', name: '', role: '' }));
     $('#add-budget').onclick = change(() => draft.budget.push({ item: '', use: '', unit: '', total: 0, vendor: '' }));
-    $$('[data-regen]').forEach(b => b.onclick = change(() => { draft.members[Number(b.dataset.regen)].pin = genPin(); }));
     $$('[data-del-member]').forEach(b => b.onclick = change(() => draft.members.splice(Number(b.dataset.delMember), 1)));
     $$('[data-del-budget]').forEach(b => b.onclick = change(() => draft.budget.splice(Number(b.dataset.delBudget), 1)));
     $('#edit-form').onsubmit = async e => {
@@ -1280,8 +1237,7 @@ async function renderEdit(teamId) {
       const submitBtn = e.target.querySelector('button[type=submit]');
       submitBtn.disabled = true;
       try {
-        const pinMap = Object.fromEntries(draft.members.map(m => [m.sid, m.pin]));
-        await saveTeam(team, draft, pinMap);
+        await saveTeam(team, draft);
         state.dirty = false;
         toast('계획서를 저장했습니다.');
         location.hash = `#/team/${team.id}/info`;
@@ -1294,23 +1250,34 @@ async function renderEdit(teamId) {
   render();
 }
 
-// ---------- 접속코드 목록 (교사, 인쇄용) ----------
+// ---------- 접속 안내 (교사, 인쇄용) ----------
 
 async function renderPins() {
   const teams = (await getDocs(collection(db, 'teams'))).docs
     .map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
-  const pins = await fetchPins(teams.flatMap(t => t.members.map(m => m.sid)));
+  const url = location.origin + location.pathname;
   page(`
-    <div class="page-head no-print"><div><h1>학생 접속코드</h1><p class="muted small">인쇄해서 잘라 나눠 주세요. 코드 변경은 [계획서 편집]에서 합니다.</p></div>
-      <div class="actions"><button class="btn-primary" onclick="window.print()">🖨 인쇄</button></div></div>
-    <div class="pin-grid">${teams.flatMap(t => t.members.map(m => `
-      <div class="pin-card">
-        <div class="small muted">SLAT 기록장 · ${esc(t.name)}</div>
-        <div><b>${esc(m.sid)} ${esc(m.name)}</b></div>
-        <div class="pin-code">${esc(pins[m.sid] || '(없음)')}</div>
-        <div class="small muted">${esc(location.origin + location.pathname)}</div>
-      </div>`)).join('') || '<p class="muted">팀원이 없습니다.</p>'}</div>`, 'pins');
+    <div class="page-head no-print">
+      <div><h1>학생 접속 안내</h1><p class="muted small">학생은 아래 주소에서 <b>학번</b>만 입력하면 들어옵니다. 인쇄해서 나눠 주거나 화면으로 보여 주세요.</p></div>
+      <div class="actions"><button class="btn-primary" onclick="window.print()">🖨 인쇄</button></div>
+    </div>
+    <div class="card qr-card">
+      <img src="qr.png" alt="접속 주소 QR 코드" width="220" height="220">
+      <div>
+        <h2>휴대폰으로 접속하기</h2>
+        <ol class="qr-steps">
+          <li>카메라로 QR 코드를 찍습니다.</li>
+          <li>학번을 입력하고 [로그인]을 누릅니다.</li>
+          <li>차시를 골라 그날 한 활동을 적고 [제출]합니다.</li>
+        </ol>
+        <p class="qr-url">${esc(url)}</p>
+      </div>
+    </div>
+    ${teams.map(t => `
+      <div class="section-title"><h2>${esc(t.name)}</h2></div>
+      <div class="chips">${t.members.map(m => `<span class="chip"><b>${esc(m.sid)}</b> ${esc(m.name)}</span>`).join('') || '<span class="muted">팀원 없음</span>'}</div>`).join('')}
+    <p class="small muted no-print" style="margin-top:20px">※ 접속코드 없이 학번만으로 들어갑니다. 남의 학번으로도 들어갈 수 있으니, 기록은 선생님이 확인해 주세요.</p>`, 'pins');
 }
 
 // ---------- 설정 (교사) ----------

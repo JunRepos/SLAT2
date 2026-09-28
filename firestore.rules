@@ -2,7 +2,8 @@ rules_version = '2';
 
 // SLAT 기록장 보안 규칙
 //  - 교사: Firebase Authentication 이메일/비밀번호 계정 (아래 목록의 이메일만)
-//  - 학생: 익명 로그인 후 links/{uid} 에 {학번, 접속코드}를 기록하면, 규칙이 pins/{학번}과 대조해 팀 권한을 준다.
+//  - 학생: 익명 로그인 후 links/{uid} 에 학번을 기록하면, 규칙이 roster/{학번}과 대조해 그 팀 권한만 준다.
+//    (접속코드 없이 학번만으로 들어오므로, 남의 학번으로 들어오는 것은 막지 못한다.)
 //
 // 컬렉션
 //  teams/{teamId}              계획서 (교사만 쓰기, 팀원 읽기)
@@ -10,8 +11,7 @@ rules_version = '2';
 //  teams/{teamId}/attendance/{no}  교사 출결 체크 (팀원 읽기)
 //  (구매 내역은 teams/{teamId} 문서의 purchases 필드 — 교사만 쓰기)
 //  roster/{sid}                학번 → {name, teamId} (교사만 쓰기, 본인 읽기)
-//  pins/{sid}                  학번 → {pin} 접속코드 (교사만)
-//  links/{uid}                 로그인한 학생 기기 → {sid, pin, at}
+//  links/{uid}                 로그인한 학생 기기 → {sid, at}
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -30,10 +30,10 @@ service cloud.firestore {
     function link() {
       return get(/databases/$(database)/documents/links/$(request.auth.uid)).data;
     }
-    // 교사가 접속코드를 바꾸면 기존 로그인은 즉시 무효가 된다.
+    // 명단(roster)에 있는 학번이어야 유효한 로그인. 명단에서 빼면 즉시 무효가 된다.
     function validLink() {
       return hasLink()
-        && get(/databases/$(database)/documents/pins/$(link().sid)).data.pin == link().pin;
+        && exists(/databases/$(database)/documents/roster/$(link().sid));
     }
     function self() {
       return get(/databases/$(database)/documents/roster/$(link().sid)).data;
@@ -62,13 +62,9 @@ service cloud.firestore {
     match /links/{uid} {
       allow read, delete: if request.auth != null && (request.auth.uid == uid || isTeacher());
       allow create, update: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['sid', 'pin', 'at'])
+        && request.resource.data.keys().hasOnly(['sid', 'at'])
         && request.resource.data.sid is string
-        && get(/databases/$(database)/documents/pins/$(request.resource.data.sid)).data.pin == request.resource.data.pin;
-    }
-
-    match /pins/{sid} {
-      allow read, write: if isTeacher();
+        && exists(/databases/$(database)/documents/roster/$(request.resource.data.sid));
     }
 
     match /roster/{sid} {
