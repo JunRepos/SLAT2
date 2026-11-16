@@ -360,8 +360,8 @@ const PREVIEW_BLOCK = '미리보기 중에는 저장되지 않습니다. 실제�
 function page(html, active) {
   const me = state.me;
   const links = me.role === 'teacher'
-    ? [['dashboard', '#/dashboard', '대시보드'], ['attendance', '#/attendance', '출결'], ['reports', '#/reports', '최종 보고서'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속 안내'], ['settings', '#/settings', '설정']]
-    : [['report', `#/team/${me.teamId}/report`, '최종 보고서']];
+    ? [['dashboard', '#/dashboard', '대시보드'], ['logs', '#/logs', '차시 기록'], ['attendance', '#/attendance', '출결'], ['reports', '#/reports', '최종 보고서'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속 안내'], ['settings', '#/settings', '설정']]
+    : [['report', `#/team/${me.teamId}/report`, '최종 보고서'], ['poster', `#/team/${me.teamId}/poster`, '포스터']];
   $app.innerHTML = `
     <header class="topbar"><div class="wrap topbar-in">
       <a class="brand" href="#/">SLAT<span>학교주도활동 기록장</span></a>
@@ -378,6 +378,8 @@ function page(html, active) {
 async function route() {
   if (!state.ready) return;
   state.dirty = false;
+  document.getElementById('poster-page-style')?.remove();
+  window.onresize = null;
   const me = state.me;
   if (!me) return renderLogin();
   if (me.role === 'unauthorized') return renderUnauthorized();
@@ -388,11 +390,13 @@ async function route() {
     if (me.role === 'teacher') {
       if (parts[0] === 'preview' && parts[1] && parts[2]) return await startPreview(parts[1], parts[2]);
       if (parts[0] === 'dashboard') return await renderDashboard();
+      if (parts[0] === 'logs') return await renderLogsOverview();
       if (parts[0] === 'pins') return await renderPins();
       if (parts[0] === 'attendance') return await renderAttendance(Number(parts[1]) || 0);
       if (parts[0] === 'budget') return await renderBudgetOverview();
       if (parts[0] === 'reports') return await renderReports(parts[1] === 'all');
       if (parts[0] === 'team' && parts[1] && parts[2] === 'report' && parts[3]) return await renderReport(parts[1], parts[3]);
+      if (parts[0] === 'team' && parts[1] && parts[2] === 'poster') return await renderPoster(parts[1]);
       if (parts[0] === 'team' && parts[2] === 's' && parts[3] && parts[4] === 'edit') return await renderLog(parts[1], Number(parts[3]), true);
       if (parts[0] === 'settings') return renderSettings();
       if (parts[0] === 'team' && parts[1] && parts[2] === 'edit') return await renderEdit(parts[1]);
@@ -400,6 +404,7 @@ async function route() {
     // 학생은 최종 보고서만 쓴다. 차시별 기록 화면은 교사만 본다(지난 기록 확인용).
     if (me.role === 'student') {
       if (parts[0] === 'team' && parts[1] === me.teamId && parts[2] === 'report' && !parts[3]) return await renderReport(me.teamId, me.sid);
+      if (parts[0] === 'team' && parts[1] === me.teamId && parts[2] === 'poster' && !parts[3]) return await renderPoster(me.teamId);
       return location.replace(home);
     }
     if (parts[0] === 'team' && parts[1]) {
@@ -500,10 +505,72 @@ function renderLogin() {
   $('#sid').focus();
 }
 
-// ---------- 교사 대시보드 ----------
+// ---------- 교사 대시보드: 학생별 출결과 최종 보고서 ----------
 
 async function renderDashboard() {
   const teams = await fetchAllTeams();
+  if (!teams.length) return renderLogsOverview(teams);
+  let blocked = false;
+  await Promise.all(teams.map(async t => {
+    t.reports = await fetchReports(t.id);
+    if (!t.reports) { blocked = true; t.reports = {}; }
+  }));
+  const today = todayStr();
+  const all = teams.flatMap(t => t.members.map(m => ({ t, m, r: t.reports[m.sid] || emptyReport() })));
+  const n = st => all.filter(x => x.r.status === st).length;
+  const mark = (t, s, m) => t.attendance[s.no]?.marks?.[m.sid] || '';
+  const countMark = k => teams.reduce((sum, t) => sum + t.members.reduce((x, m) => x + t.sessions.filter(s => mark(t, s, m) === k).length, 0), 0);
+  // 날짜가 지났는데 출결을 하나도 입력하지 않은 차시
+  const maxNo = Math.max(...teams.map(t => t.sessions.length));
+  const refSessions = teams.find(t => t.sessions.length === maxNo).sessions;
+  const unmarked = refSessions.filter(s => s.date <= today && teams.some(t => t.members.length && t.sessions.some(x => x.no === s.no) && !Object.keys(t.attendance[s.no]?.marks || {}).length));
+  const masked = teams.flatMap(t => t.members.filter(m => m.name.includes('0')).map(m => ({ t, m })));
+
+  const teamTable = t => `
+    <div class="section-title"><h2>${esc(t.name)} <span class="small muted" style="font-weight:400">${esc(t.topic)}</span></h2>
+      <span class="small"><a href="#/team/${t.id}">차시 기록</a> · <a href="#/team/${t.id}/poster">포스터</a> · <a href="#/team/${t.id}/info">계획서</a></span></div>
+    <div class="table-scroll"><table class="att-summary dash-table">
+      <thead><tr><th>학생</th>${t.sessions.map(s => `<th class="c" title="${fmtDate(s.date)}"><a href="#/attendance/${s.no}">${s.no}</a></th>`).join('')}<th class="c">결석</th><th class="c">지각·조퇴</th><th>최종 보고서</th></tr></thead>
+      <tbody>${t.members.map(m => {
+        const row = t.sessions.map(s => mark(t, s, m));
+        const r = t.reports[m.sid] || emptyReport();
+        const late = row.filter(v => v === '지각' || v === '조퇴').length;
+        return `<tr>
+          <td class="nm"><b>${esc(m.name)}</b> <span class="small muted">${esc(m.sid)}</span></td>
+          ${row.map((v, i) => `<td class="c ${MARK_CLS[v] || ''}" title="${v || (t.sessions[i].date <= today ? '미입력' : '')}">${v ? MARK_ABBR[v] : t.sessions[i].date <= today ? '<span class="muted">·</span>' : ''}</td>`).join('')}
+          <td class="c ${row.includes('결석') ? 'm-absent' : ''}">${row.filter(v => v === '결석').length || ''}</td>
+          <td class="c ${late ? 'm-late' : ''}">${late || ''}</td>
+          <td class="rp">${blocked ? '<span class="muted small">규칙 배포 필요</span>' : `<a href="#/team/${t.id}/report/${esc(m.sid)}"><span class="badge ${STATUS[r.status].cls}">${STATUS[r.status].label}</span></a>${r.status === 'submitted' ? ` <a class="btn btn-sm" href="#/team/${t.id}/report/${esc(m.sid)}">검토하기</a>` : ''}`}</td>
+        </tr>`;
+      }).join('') || '<tr><td class="muted">팀원이 없습니다.</td></tr>'}</tbody>
+    </table></div>`;
+
+  page(`
+    <div class="page-head">
+      <div><h1>대시보드</h1><p class="muted small">오늘 ${fmtDate(today)} · 학생별 출결과 최종 보고서 제출 현황입니다. 차시별 활동 기록은 <a href="#/logs">[차시 기록]</a> 탭에 있습니다.</p></div>
+      <div class="actions"><a class="btn" href="#/attendance">출결 입력</a><a class="btn" href="#/reports">최종 보고서 전체</a></div>
+    </div>
+    ${masked.length ? `<div class="feedback-box revise" style="margin-bottom:16px">
+      <b>⚠ 이름이 가려진 팀원이 ${masked.length}명 있습니다 — 학생이 로그인할 수 없습니다</b>
+      <div class="small" style="margin-top:4px">각 팀 <b>[계획서]</b>에서 실명(과 실제 학번)으로 고쳐 주세요.</div>
+    </div>` : ''}
+    ${blocked ? `<div class="feedback-box revise" style="margin-bottom:16px"><b>⚠ ${RULES_NOTICE}</b> <span class="small"><code>firestore.rules</code>를 다시 게시해 주세요.</span></div>` : ''}
+    <div class="stats">
+      <div class="stat"><div class="num">${teams.length}<small> 팀</small></div><div class="lbl">참여 학생 ${all.length}명</div></div>
+      <div class="stat"><div class="num">${n('submitted') + n('approved') + n('revise')}<small> / ${all.length}</small></div><div class="lbl">최종 보고서 제출</div></div>
+      <div class="stat ${n('submitted') ? 'alert' : ''}"><div class="num">${n('submitted')}</div><div class="lbl">보고서 확인 대기</div></div>
+      <div class="stat ${n('empty') + n('draft') ? 'alert' : ''}"><div class="num">${n('empty') + n('draft')}</div><div class="lbl">보고서 미제출 (작성 중 ${n('draft')})</div></div>
+      <div class="stat"><div class="num">${countMark('결석')}</div><div class="lbl">결석 누계 · 지각 ${countMark('지각')} · 조퇴 ${countMark('조퇴')}</div></div>
+    </div>
+    ${unmarked.length ? `<p class="small" style="margin:14px 0 0">출결을 아직 입력하지 않은 차시: ${unmarked.map(s => `<a href="#/attendance/${s.no}">${s.no}차시(${fmtDate(s.date)})</a>`).join(' · ')}</p>` : ''}
+    ${teams.map(teamTable).join('')}
+    <p class="legend" style="margin-top:14px">○ 출석 · 지 지각 · 조 조퇴 · × 결석 · 공 공결 · <span class="muted">·</span> 미입력 — 차시 번호를 누르면 그 차시 출결을 입력합니다.</p>`, 'dashboard');
+}
+
+// ---------- 교사: 차시 기록 현황 ----------
+
+async function renderLogsOverview(given) {
+  const teams = given || await fetchAllTeams();
 
   if (!teams.length) {
     page(`
@@ -567,7 +634,7 @@ async function renderDashboard() {
 
   page(`
     <div class="page-head">
-      <div><h1>대시보드</h1><p class="muted small">오늘 ${fmtDate(today)} · 총 ${maxNo}차시</p></div>
+      <div><h1>차시 기록</h1><p class="muted small">오늘 ${fmtDate(today)} · 총 ${maxNo}차시 · 학생의 차시별 제출은 마감했습니다. 지난 기록을 확인하는 화면입니다.</p></div>
       <div class="actions">
         <button class="btn" id="csv">⬇ 전체 기록 CSV</button>
         <button class="btn" id="add-team">＋ 팀 추가</button>
@@ -607,7 +674,7 @@ async function renderDashboard() {
       <div class="card"><h2 style="margin-bottom:8px">기한 지난 미제출 (${overdue.length})</h2>
         ${queue(overdue, ({ t, s, status }) => `<li><span><b>${esc(t.name)}</b> · ${s.no}차시 <span class="muted small">${fmtDate(s.date)} · ${STATUS[status].label}</span></span><a class="btn btn-sm" href="#/team/${t.id}/s/${s.no}">보기</a></li>`, '밀린 기록이 없습니다. 👍')}
       </div>
-    </div>`, 'dashboard');
+    </div>`, 'logs');
 
   $('#add-team').onclick = () => addTeam(teams.length);
   $('#csv').onclick = () => downloadCsv(teams);
@@ -704,7 +771,7 @@ async function renderTeam(teamId) {
 
   page(`
     <div class="card team-hero">
-      ${me.role === 'teacher' ? `<div class="crumb"><a href="#/dashboard">대시보드</a> › 팀</div>` : ''}
+      ${me.role === 'teacher' ? `<div class="crumb"><a href="#/logs">차시 기록</a> › 팀</div>` : ''}
       <div class="page-head" style="margin-bottom:0">
         <div>
           <div class="muted small">${esc(team.name)} · ${esc(team.place)} · ${esc(team.time)}</div>
@@ -737,7 +804,7 @@ async function renderTeam(teamId) {
         <div class="right"><span class="badge ${STATUS[myReport.status].cls}">${STATUS[myReport.status].label}</span><span class="btn btn-sm">${myReport.status === 'approved' ? '보기' : myReport.status === 'empty' ? '작성하기' : '이어서 작성'}</span></div>
       </a>` : ''}
     <div class="section-title"><h2>차시별 활동 기록</h2><span class="muted small">매 차시가 끝나면 그날 한 활동을 기록하고 [제출]하세요.</span></div>
-    <div class="session-list">${cards}</div>`, 'team');
+    <div class="session-list">${cards}</div>`, 'logs');
 }
 
 // ---------- 차시 기록 (작성·검토) ----------
@@ -777,7 +844,7 @@ async function renderLog(teamId, no, editMode = false) {
     : '';
 
   const head = `
-    <div class="crumb"><a href="${isTeacher ? '#/dashboard' : `#/team/${team.id}`}">${isTeacher ? '대시보드' : '차시 기록'}</a> › ${isTeacher ? `<a href="#/team/${team.id}">${esc(team.name)}</a> › ` : ''}${isTeacher && editMode ? `<a href="${base}">${s.no}차시</a> › 직접 작성` : `${s.no}차시`}</div>
+    <div class="crumb"><a href="${isTeacher ? '#/logs' : `#/team/${team.id}`}">차시 기록</a> › ${isTeacher ? `<a href="#/team/${team.id}">${esc(team.name)}</a> › ` : ''}${isTeacher && editMode ? `<a href="${base}">${s.no}차시</a> › 직접 작성` : `${s.no}차시`}</div>
     <div class="page-head"><div><h1>${s.no}차시 활동 기록 ${badge(log.status, s.date)}</h1>
       <p class="muted small">${esc(team.name)} · ${fmtDate(s.date)} ${esc(team.time)}${log.updatedAt ? ` · 마지막 수정 ${fmtDateTime(log.updatedAt)} (${esc(log.updatedBy)})` : ''}</p></div></div>`;
 
@@ -846,7 +913,7 @@ async function renderLog(teamId, no, editMode = false) {
       </div>`;
   }
 
-  page(`${head}<div class="log-layout">${planBox}${main}</div>`, 'team');
+  page(`${head}<div class="log-layout">${planBox}${main}</div>`, 'logs');
 
   if (editable) {
     const form = $('#log-form');
@@ -1241,7 +1308,7 @@ async function renderReports(showAll) {
       <div class="stat"><div class="num">${n('approved')}</div><div class="lbl">확인 완료</div></div>
     </div>
     ${teams.map(t => `
-      <div class="section-title"><h2>${esc(t.name)}</h2><span class="muted small">${esc(t.topic)}</span></div>
+      <div class="section-title"><h2>${esc(t.name)}</h2><span class="muted small">${esc(t.topic)} · <a href="#/team/${t.id}/poster">포스터 보기 · 인쇄</a></span></div>
       ${commonBox(t)}
       <div class="table-scroll"><table>
         <thead><tr><th>학생</th><th>상태</th><th class="num">분량</th><th>제출</th><th>피드백</th><th></th></tr></thead>
@@ -1263,6 +1330,283 @@ async function renderReports(showAll) {
     ...all.map(({ t, m, r }) => [t.name, t.topic, m.sid, m.name, STATUS[r.status].label, ...REPORT_FIELDS.map(q => r[q.k]), r.feedback,
       r.submittedAt ? new Date(r.submittedAt).toLocaleString('ko-KR') : '']),
   ], `SLAT_최종보고서_${todayStr()}.csv`);
+}
+
+// ---------- 포스터 (팀별, B4 1장) ----------
+// 팀원이 함께 글과 사진을 넣으면 정해진 디자인으로 포스터가 만들어진다.
+// 글은 teams/{teamId}/poster/main 한 문서에, 사진은 줄여서 poster/photo-{구역} 문서에 하나씩 저장한다.
+
+const POSTER_THEMES = [
+  { k: 'green', name: '초록', c: '#2f5d50', s: '#e6efec' },
+  { k: 'navy', name: '남색', c: '#1f3a6e', s: '#e7ecf6' },
+  { k: 'wine', name: '자주', c: '#7a2a3a', s: '#f6e8eb' },
+  { k: 'orange', name: '주황', c: '#b4521a', s: '#fbeee4' },
+  { k: 'dark', name: '먹색', c: '#2b2f36', s: '#eceef1' },
+];
+const POSTER_LAYOUTS = [{ k: 'port', name: '세로 (2단)' }, { k: 'land', name: '가로 (3단)' }];
+// from: 최종 보고서에서 가져올 수 있는 항목. rec: 권장 글자 수.
+const POSTER_SECS = [
+  { k: 'motive', title: '탐구 동기', from: 'motive', rec: [80, 250],
+    guide: '왜 이 주제를 탐구하게 되었는지 씁니다. 2~3문장이면 충분합니다.' },
+  { k: 'method', title: '탐구 내용', from: 'activity', rec: [150, 450], photo: '실험 장치나 활동하는 모습',
+    guide: '무엇을 어떤 방법으로 탐구했는지 씁니다. 실험을 했다면 준비물, 조건, 순서를 1. 2. 3. 번호를 붙여서 쓰면 읽기 쉽습니다.' },
+  { k: 'result', title: '탐구 결과', from: 'insight', rec: [150, 450], photo: '그래프, 표, 완성한 결과물', key: true,
+    guide: '탐구해서 알게 된 것을 씁니다. 포스터에서 가장 중요한 부분입니다. 그래프나 표가 있으면 꼭 사진으로 넣으세요.' },
+  { k: 'difficulty', title: '어려웠던 점과 해결', from: 'difficulty', rec: [80, 300],
+    guide: '하다가 막혔던 것 하나와 그것을 어떻게 해결했는지 씁니다.' },
+  { k: 'insight', title: '느낀 점', rec: [80, 300],
+    guide: '활동을 마치고 팀이 느낀 점, 더 탐구해 보고 싶은 것을 씁니다.' },
+];
+const POSTER_TEXT_MAX = 1200;
+const posterDefaults = team => ({
+  title: team.topic || '', sub: '', theme: 'green', layout: 'port', sources: '',
+  ...Object.fromEntries(POSTER_SECS.flatMap(q => [[`t_${q.k}`, ''], [`c_${q.k}`, '']])),
+});
+
+// {main, photos} 또는 새 보안 규칙이 아직 없으면 null
+async function fetchPoster(teamId) {
+  try {
+    const out = { main: {}, photos: {} };
+    (await getDocs(collection(db, 'teams', teamId, 'poster'))).forEach(d => {
+      if (d.id === 'main') out.main = d.data();
+      else if (d.id.startsWith('photo-')) out.photos[d.id.slice(6)] = d.data().data;
+    });
+    return out;
+  } catch (e) {
+    if (e.code === 'permission-denied') return null;
+    throw e;
+  }
+}
+
+// 사진을 Firestore 문서 하나(1MB)에 들어가도록 줄여서 JPEG data URL로 만든다.
+async function shrinkPhoto(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error('이 사진은 열 수 없습니다. JPG나 PNG 파일로 다시 올려 주세요.'));
+      im.src = url;
+    });
+    for (const [side, q] of [[1500, 0.85], [1300, 0.8], [1100, 0.75], [900, 0.7], [700, 0.65]]) {
+      const k = Math.min(1, side / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * k);
+      cv.height = Math.round(img.height * k);
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      const data = cv.toDataURL('image/jpeg', q);
+      if (data.length < 880000) return data;
+    }
+    throw new Error('사진이 너무 큽니다. 더 작은 사진으로 올려 주세요.');
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function posterHtml(team, d, photos) {
+  const th = POSTER_THEMES.find(t => t.k === d.theme) || POSTER_THEMES[0];
+  const secs = POSTER_SECS.filter(q => (d[`t_${q.k}`] || '').trim() || photos[q.k]);
+  return `
+    <div class="poster ${d.layout === 'land' ? 'land' : ''}" style="--pc:${th.c};--pcs:${th.s}">
+      <div class="p-head">
+        <div class="p-kicker">SLAT 학교주도활동 · 주제 탐구 프로젝트</div>
+        <h1>${esc(d.title) || '<span class="p-empty">제목을 입력하세요</span>'}</h1>
+        ${(d.sub || '').trim() ? `<div class="p-sub">${esc(d.sub)}</div>` : ''}
+        <div class="p-team"><b>${esc(team.name)}</b>${team.members.map(m => `<span>${esc(m.name)}</span>`).join('')}</div>
+      </div>
+      <div class="p-body">
+        ${secs.map((q, i) => `
+          <section class="p-sec ${q.key ? 'key' : ''}">
+            <h2><span>${i + 1}</span>${esc(q.title)}</h2>
+            ${(d[`t_${q.k}`] || '').trim() ? `<p>${esc(d[`t_${q.k}`].trim())}</p>` : ''}
+            ${photos[q.k] ? `<figure><img src="${esc(photos[q.k])}" alt="">${(d[`c_${q.k}`] || '').trim() ? `<figcaption>${esc(d[`c_${q.k}`])}</figcaption>` : ''}</figure>` : ''}
+          </section>`).join('') || '<p class="p-empty">왼쪽(위)에 내용을 쓰면 여기에 포스터가 만들어집니다.</p>'}
+        ${(d.sources || '').trim() ? `<section class="p-sec p-src"><h3>참고 자료</h3><p>${esc(d.sources.trim())}</p></section>` : ''}
+      </div>
+    </div>`;
+}
+
+// 글자 크기를 줄여 가며 한 장에 들어가게 맞춘다. 끝까지 넘치면 false.
+function fitPoster(el) {
+  const body = el.querySelector('.p-body');
+  const over = () => body.scrollWidth > body.clientWidth + 1 || body.scrollHeight > body.clientHeight + 1;
+  for (const ph of [78, 62, 48]) {
+    el.style.setProperty('--ph', `${ph}mm`);
+    for (let pt = 16; pt >= 8.5; pt -= 0.5) {
+      el.style.setProperty('--pf', `${pt}pt`);
+      if (!over()) return true;
+    }
+  }
+  return false;
+}
+
+async function renderPoster(teamId) {
+  const snap = await getDoc(doc(db, 'teams', teamId));
+  if (!snap.exists()) throw new Error('팀을 찾을 수 없습니다.');
+  const team = { id: snap.id, ...snap.data() };
+  const me = state.me;
+  const isTeacher = me.role === 'teacher';
+  const got = await fetchPoster(teamId);
+  if (!got) {
+    return page(`<div class="card"><h2>아직 준비 중입니다</h2><p>포스터 만들기는 새 보안 규칙이 배포되어야 쓸 수 있습니다.${isTeacher ? ' <code>firestore.rules</code>를 배포해 주세요.' : ' 선생님께 알려 주세요.'}</p></div>`, 'poster');
+  }
+  const saved = { ...posterDefaults(team), ...got.main };
+  const d = { ...saved };
+  const photos = got.photos;
+  const myReport = isTeacher ? null : await fetchReport(teamId, me.sid).catch(() => null);
+  const who = isTeacher ? '담당 교사' : `${me.sid} ${me.name}`;
+  const ref = part => doc(db, 'teams', teamId, 'poster', part);
+  const chip = (name, value, cur, label, style = '') => `<label class="pick" ${style}><input type="radio" name="${name}" value="${value}" ${cur === value ? 'checked' : ''}>${esc(label)}</label>`;
+
+  page(`
+    <div class="no-print">
+      ${isTeacher ? `<div class="crumb"><a href="#/reports">최종 보고서</a> › ${esc(team.name)} › 포스터</div>` : ''}
+      <div class="page-head">
+        <div><h1>포스터 만들기</h1><p class="muted small">${esc(team.name)} · B4 1장 · 팀원이 함께 만드는 포스터입니다. 누가 저장하든 팀 전체에 반영됩니다.${got.main.updatedAt ? ` · 마지막 저장 ${fmtDateTime(got.main.updatedAt)} (${esc(got.main.updatedBy)})` : ''}</p></div>
+        <div class="actions"><button id="p-save" class="btn-primary">저장</button><button id="p-print" class="btn">🖨 인쇄 / PDF</button></div>
+      </div>
+      <p class="err" id="p-err"></p>
+    </div>
+    <div class="poster-layout">
+      <form class="card no-print" id="poster-form">
+        <div class="poster-tips">
+          <b>이렇게 만들면 보기 좋습니다</b>
+          <ul>
+            <li>글은 짧게 씁니다. 칸마다 적힌 글자 수를 넘기지 마세요.</li>
+            <li>사진은 2장 이상 넣습니다. 탐구 결과에는 그래프나 표를 넣으세요.</li>
+            <li>사진은 밝은 곳에서 가까이 찍고, 그래프는 화면을 캡처해서 올립니다.</li>
+            <li>글자 크기와 배치는 자동으로 맞춰집니다. 오른쪽(아래) 미리보기를 보면서 쓰세요.</li>
+          </ul>
+        </div>
+        <div class="field"><label>색</label><div class="picks">${POSTER_THEMES.map(t => chip('theme', t.k, d.theme, t.name, `style="--dot:${t.c}"`)).join('')}</div></div>
+        <div class="field"><label>방향</label><div class="picks">${POSTER_LAYOUTS.map(l => chip('layout', l.k, d.layout, l.name)).join('')}</div></div>
+        <div class="field"><label for="p-title">제목 <span class="hint">탐구 주제나 탐구 이름</span></label><input type="text" id="p-title" data-k="title" maxlength="60" value="${esc(d.title)}"></div>
+        <div class="field"><label for="p-sub">한 줄 소개 <span class="hint">안 써도 됩니다. 탐구 결과를 한 문장으로</span></label><input type="text" id="p-sub" data-k="sub" maxlength="80" value="${esc(d.sub)}"></div>
+        ${POSTER_SECS.map((q, i) => `
+          <div class="field poster-sec" data-sec="${q.k}">
+            <label for="p-t-${q.k}">${i + 1}. ${esc(q.title)}</label>
+            <p class="guide">${esc(q.guide)}</p>
+            <textarea id="p-t-${q.k}" data-k="t_${q.k}" rows="5" maxlength="${POSTER_TEXT_MAX}">${esc(d[`t_${q.k}`])}</textarea>
+            <div class="report-under">
+              ${myReport && q.from && (myReport[q.from] || '').trim() ? `<button type="button" class="btn-sm" data-from="${q.k}">내 최종 보고서에서 가져오기</button>` : '<span></span>'}
+              <span class="count" data-pcount="${q.k}"></span>
+            </div>
+            <div class="photo-row">
+              <label class="btn btn-sm">📷 사진 ${photos[q.k] ? '바꾸기' : '넣기'}<input type="file" accept="image/*" data-photo="${q.k}" hidden></label>
+              ${photos[q.k] ? `<button type="button" class="btn-sm btn-danger" data-rm="${q.k}">사진 빼기</button>` : `<span class="small muted">${q.photo ? `추천: ${esc(q.photo)}` : '없어도 됩니다'}</span>`}
+            </div>
+            ${photos[q.k] ? `<input type="text" data-k="c_${q.k}" maxlength="60" placeholder="사진 설명 (예: 그림 1. 조건별 농도 변화)" value="${esc(d[`c_${q.k}`])}" style="margin-top:6px">` : ''}
+          </div>`).join('')}
+        <div class="field"><label for="p-src">참고 자료 <span class="hint">안 써도 됩니다. 책·기사 이름을 쉼표로 이어서</span></label><input type="text" id="p-src" data-k="sources" maxlength="300" value="${esc(d.sources)}"></div>
+      </form>
+      <div class="poster-side">
+        <p class="err no-print" id="p-over"></p>
+        <div class="poster-stage" id="p-stage"></div>
+      </div>
+    </div>`, 'poster');
+
+  // 인쇄할 때 용지를 포스터 크기(B4)에 맞춘다. 다른 화면으로 가면 route()가 지운다.
+  const pageStyle = document.createElement('style');
+  pageStyle.id = 'poster-page-style';
+  document.head.appendChild(pageStyle);
+
+  const stage = $('#p-stage');
+  const scale = () => {
+    const el = stage.firstElementChild;
+    if (!el) return;
+    const k = Math.min(1, stage.clientWidth / el.offsetWidth);
+    el.style.transform = `scale(${k})`;
+    stage.style.height = `${el.offsetHeight * k}px`;
+  };
+  const draw = () => {
+    stage.innerHTML = posterHtml(team, d, photos);
+    const el = stage.firstElementChild;
+    pageStyle.textContent = `@page { size: ${d.layout === 'land' ? '364mm 257mm' : '257mm 364mm'}; margin: 0; }`;
+    const fit = () => {
+      $('#p-over').textContent = fitPoster(el) ? '' : '⚠ 내용이 한 장에 다 들어가지 않습니다. 글을 줄이거나 사진을 빼 주세요.';
+      scale();
+    };
+    fit();
+    el.querySelectorAll('img').forEach(im => { if (!im.complete) im.onload = fit; });
+  };
+  const counts = () => POSTER_SECS.forEach(q => {
+    const n = $(`#p-t-${q.k}`).value.trim().length;
+    const el = $(`[data-pcount="${q.k}"]`);
+    el.textContent = `${n}자 (권장 ${q.rec[0]}~${q.rec[1]}자)`;
+    el.classList.toggle('over', n > q.rec[1]);
+  });
+  draw();
+  counts();
+  window.onresize = scale;
+
+  let timer;
+  const form = $('#poster-form');
+  form.addEventListener('input', e => {
+    const t = e.target;
+    if (t.type === 'radio') d[t.name] = t.value;
+    else if (t.dataset.k) d[t.dataset.k] = t.value;
+    else return;
+    state.dirty = true;
+    counts();
+    clearTimeout(timer);
+    timer = setTimeout(draw, 200);
+  });
+  const fail = e => { $('#p-err').textContent = friendlyError(e); };
+
+  $$('[data-from]').forEach(b => b.onclick = () => {
+    const q = POSTER_SECS.find(x => x.k === b.dataset.from);
+    const ta = $(`#p-t-${q.k}`);
+    if (ta.value.trim() && !confirm('지금 쓴 내용을 지우고 내 최종 보고서의 답으로 바꿀까요?')) return;
+    ta.value = myReport[q.from].slice(0, POSTER_TEXT_MAX);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    toast('가져왔습니다. 포스터에 맞게 짧게 줄여 주세요.');
+  });
+
+  // 글 저장: 바뀐 항목만 보내서 다른 팀원이 고친 다른 칸을 덮어쓰지 않는다.
+  const save = async () => {
+    $('#p-err').textContent = '';
+    if (me.preview) { $('#p-err').textContent = PREVIEW_BLOCK; return false; }
+    const changed = Object.fromEntries(Object.keys(d).filter(k => d[k] !== saved[k]).map(k => [k, d[k]]));
+    try {
+      await setDoc(ref('main'), { ...changed, updatedAt: new Date().toISOString(), updatedBy: who }, { merge: true });
+      Object.assign(saved, d);
+      state.dirty = false;
+      return true;
+    } catch (e) {
+      fail(e);
+      return false;
+    }
+  };
+  $('#p-save').onclick = async () => { if (await save()) toast('저장했습니다.'); };
+  $('#p-print').onclick = () => window.print();
+
+  // 사진은 고르는 즉시 저장한다. 화면을 다시 그려야 해서 글도 함께 저장해 둔다.
+  $$('[data-photo]').forEach(inp => inp.onchange = async () => {
+    const file = inp.files[0];
+    if (!file) return;
+    $('#p-err').textContent = '';
+    try {
+      const data = await shrinkPhoto(file);
+      if (me.preview) { $('#p-err').textContent = PREVIEW_BLOCK; return; }
+      toast('사진을 올리는 중…');
+      await setDoc(ref(`photo-${inp.dataset.photo}`), { data, updatedAt: new Date().toISOString() });
+      if (await save()) { toast('사진을 넣었습니다.'); route(); }
+    } catch (e) {
+      fail(e);
+    }
+  });
+  $$('[data-rm]').forEach(b => b.onclick = async () => {
+    if (me.preview) { $('#p-err').textContent = PREVIEW_BLOCK; return; }
+    try {
+      await deleteDoc(ref(`photo-${b.dataset.rm}`));
+      if (await save()) route();
+    } catch (e) {
+      fail(e);
+    }
+  });
 }
 
 // ---------- 출결 (교사) ----------

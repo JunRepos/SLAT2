@@ -10,6 +10,7 @@ rules_version = '2';
 //  teams/{teamId}/logs/{no}    차시 기록 (팀원 작성, 교사 검토·직접 작성)
 //  teams/{teamId}/attendance/{no}  교사 출결 체크 (팀원 읽기)
 //  teams/{teamId}/reports/{sid}  개인별 최종 보고서 (본인 작성, 교사 확인)
+//  teams/{teamId}/poster/{part}  팀 포스터의 글(main)과 사진(photo-*) (팀원 작성)
 //  (구매 내역은 teams/{teamId} 문서의 purchases 필드 — 교사만 쓰기)
 //  roster/{sid}                학번 → {name, teamId} (교사만 쓰기, 본인 읽기)
 //  links/{uid}                 로그인한 학생 기기 → {sid, name, at}
@@ -76,6 +77,28 @@ service cloud.firestore {
         && rtext(d, 'insight') && rtext(d, 'poster') && rtext(d, 'future');
     }
 
+    // 팀 포스터: 글은 poster/main, 사진은 poster/photo-{구역} (줄인 JPEG data URL)
+    function ptext(d, k, n) {
+      return d.get(k, '') is string && d.get(k, '').size() <= n;
+    }
+    function posterMainOk(d) {
+      return d.keys().hasOnly(['title', 'sub', 'theme', 'layout', 'sources', 'updatedAt', 'updatedBy',
+          't_motive', 't_method', 't_result', 't_difficulty', 't_insight',
+          'c_motive', 'c_method', 'c_result', 'c_difficulty', 'c_insight'])
+        && ptext(d, 'title', 100) && ptext(d, 'sub', 200) && ptext(d, 'theme', 20) && ptext(d, 'layout', 20)
+        && ptext(d, 'sources', 500) && ptext(d, 'updatedAt', 40) && ptext(d, 'updatedBy', 60)
+        && ptext(d, 't_motive', 1500) && ptext(d, 't_method', 1500) && ptext(d, 't_result', 1500)
+        && ptext(d, 't_difficulty', 1500) && ptext(d, 't_insight', 1500)
+        && ptext(d, 'c_motive', 100) && ptext(d, 'c_method', 100) && ptext(d, 'c_result', 100)
+        && ptext(d, 'c_difficulty', 100) && ptext(d, 'c_insight', 100);
+    }
+    function posterPhotoOk(d) {
+      return d.keys().hasOnly(['data', 'updatedAt'])
+        && d.data is string && d.data.size() < 950000
+        && d.data.matches('^data:image/jpeg;base64,[A-Za-z0-9+/=]+$')
+        && ptext(d, 'updatedAt', 40);
+    }
+
     match /links/{uid} {
       allow read, delete: if request.auth != null && (request.auth.uid == uid || isTeacher());
       allow create, update: if request.auth != null && request.auth.uid == uid
@@ -115,6 +138,16 @@ service cloud.firestore {
           && (request.resource.data.status in ['draft', 'submitted']
               || request.resource.data.status == resource.data.status)
         );
+      }
+
+      // 팀 포스터: 팀원 누구나 고친다.
+      match /poster/{part} {
+        allow read: if isTeacher() || isMember(teamId);
+        allow delete: if isTeacher() || (isMember(teamId) && part.matches('photo-[a-z]+'));
+        allow create, update: if isTeacher() || (isMember(teamId) && (
+          (part == 'main' && posterMainOk(request.resource.data))
+          || (part.matches('photo-[a-z]+') && posterPhotoOk(request.resource.data))
+        ));
       }
 
       match /logs/{no} {

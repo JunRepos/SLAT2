@@ -66,12 +66,12 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   .q h2 span { flex: none; background: #111; color: #fff; border-radius: 50%; width: 6.5mm; height: 6.5mm; display: inline-grid; place-items: center; font-size: 10.5pt; transform: translateY(-.3mm); }
   .q.c { flex: 0 0 auto; }
   .q.c .lines { flex: none; height: 27mm; }
-  .q.c.short .lines { height: 10mm; background-image: none; }
+  .q.c.short .lines { height: 10mm; }
   .q h2 span.same { background: #fff; color: #111; border: 1pt solid #111; border-radius: 1.5mm; width: auto; height: auto; padding: 0 2mm; font-size: 9pt; font-weight: 600; }
   .guide { margin: 0 0 1.5mm; font-size: 9.5pt; color: #333; }
   .frames { margin: 0 0 1.5mm; padding: 1.5mm 3mm 1.5mm 7mm; background: #f1f1f1; border-radius: 1.5mm; font-size: 9pt; }
-  .lines { flex: 1; border: 1pt solid #111; border-radius: 1.5mm;
-    background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(9mm - .5pt), #bbb calc(9mm - .5pt), #bbb 9mm); background-position: 0 -1pt; }
+  .lines { flex: 1; border: 1pt solid #111; border-radius: 1.5mm; position: relative; }
+  .lines i { position: absolute; left: 3mm; right: 3mm; height: 0; border-top: .4pt solid #9a9a9a; }
   footer { margin-top: 2.5mm; font-size: 9pt; color: #555; display: flex; justify-content: space-between; }
   .ex { margin-top: 6mm; break-inside: avoid; }
   .ex h2 { font-size: 13pt; font-weight: 800; margin: 0 0 1mm; }
@@ -117,6 +117,20 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   const page = await browser.newPage();
   await page.goto(pathToFileURL(tmp).href);
   await page.evaluate(() => document.fonts.ready);
+  // 줄 칸: 칸 높이를 약 9mm 간격으로 똑같이 나눠 가는 선을 긋는다(배경 무늬는 PDF 보기 프로그램마다 다르게 보임).
+  await page.evaluate(() => {
+    const row = 9 * 96 / 25.4;
+    document.querySelectorAll('.lines').forEach(box => {
+      if (box.closest('.short')) return;
+      const h = box.clientHeight;
+      const n = Math.max(1, Math.round(h / row));
+      for (let i = 1; i < n; i++) {
+        const line = document.createElement('i');
+        line.style.top = `${(h * i) / n}px`;
+        box.appendChild(line);
+      }
+    });
+  });
   await page.pdf({ path: out, width: '257mm', height: '364mm', printBackground: true });
   await browser.close();
   fs.unlinkSync(tmp);
