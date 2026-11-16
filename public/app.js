@@ -1332,35 +1332,45 @@ async function renderReports(showAll) {
   ], `SLAT_최종보고서_${todayStr()}.csv`);
 }
 
-// ---------- 포스터 (팀별, B4 1장) ----------
-// 팀원이 함께 글과 사진을 넣으면 정해진 디자인으로 포스터가 만들어진다.
-// 글은 teams/{teamId}/poster/main 한 문서에, 사진은 줄여서 poster/photo-{구역} 문서에 하나씩 저장한다.
+// ---------- 포스터 (팀별, B4 1장, 학술 포스터 형식) ----------
+// 학회 포스터 발표처럼 초록·서론·방법·결과·결론 순서로 쓴다. 팀원이 함께 글과 사진을 넣으면 정해진 판형으로 배치된다.
+// 글은 teams/{teamId}/poster/main 한 문서에, 사진은 줄여서 poster/photo-{자리} 문서에 하나씩 저장한다.
 
 const POSTER_THEMES = [
-  { k: 'green', name: '초록', c: '#2f5d50', s: '#e6efec' },
-  { k: 'navy', name: '남색', c: '#1f3a6e', s: '#e7ecf6' },
-  { k: 'wine', name: '자주', c: '#7a2a3a', s: '#f6e8eb' },
-  { k: 'orange', name: '주황', c: '#b4521a', s: '#fbeee4' },
-  { k: 'dark', name: '먹색', c: '#2b2f36', s: '#eceef1' },
+  { k: 'navy', name: '남색', c: '#1b3463', s: '#eaeef6' },
+  { k: 'green', name: '초록', c: '#234f43', s: '#e8f0ed' },
+  { k: 'wine', name: '자주', c: '#6d2233', s: '#f5e9ec' },
+  { k: 'teal', name: '청록', c: '#0f5563', s: '#e6f1f3' },
+  { k: 'dark', name: '먹색', c: '#26292f', s: '#ecedf0' },
 ];
-const POSTER_LAYOUTS = [{ k: 'port', name: '세로 (2단)' }, { k: 'land', name: '가로 (3단)' }];
-// from: 최종 보고서에서 가져올 수 있는 항목. rec: 권장 글자 수.
+const POSTER_LAYOUTS = [
+  { k: 'port', name: '세로 2단', cls: '' },
+  { k: 'port3', name: '세로 3단', cls: 'c3' },
+  { k: 'land', name: '가로 4단', cls: 'land c4' },
+];
+// from: 최종 보고서에서 가져올 수 있는 항목. rec: 권장 글자 수. figs: 넣을 수 있는 그림 자리.
 const POSTER_SECS = [
-  { k: 'motive', title: '탐구 동기', from: 'motive', rec: [80, 250],
-    guide: '왜 이 주제를 탐구하게 되었는지 씁니다. 2~3문장이면 충분합니다.' },
-  { k: 'method', title: '탐구 내용', from: 'activity', rec: [150, 450], photo: '실험 장치나 활동하는 모습',
-    guide: '무엇을 어떤 방법으로 탐구했는지 씁니다. 실험을 했다면 준비물, 조건, 순서를 1. 2. 3. 번호를 붙여서 쓰면 읽기 쉽습니다.' },
-  { k: 'result', title: '탐구 결과', from: 'insight', rec: [150, 450], photo: '그래프, 표, 완성한 결과물', key: true,
-    guide: '탐구해서 알게 된 것을 씁니다. 포스터에서 가장 중요한 부분입니다. 그래프나 표가 있으면 꼭 사진으로 넣으세요.' },
-  { k: 'difficulty', title: '어려웠던 점과 해결', from: 'difficulty', rec: [80, 300],
-    guide: '하다가 막혔던 것 하나와 그것을 어떻게 해결했는지 씁니다.' },
-  { k: 'insight', title: '느낀 점', rec: [80, 300],
-    guide: '활동을 마치고 팀이 느낀 점, 더 탐구해 보고 싶은 것을 씁니다.' },
+  { k: 'motive', title: '탐구 동기 및 목적', from: 'motive', rec: [250, 450],
+    guide: '어떤 수업·책·경험에서 궁금증이 생겼는지 쓰고, 마지막 문장에 “본 탐구의 목적은 ~이다”처럼 무엇을 밝히려 했는지 분명히 씁니다.' },
+  { k: 'theory', title: '이론적 배경', rec: [200, 450], figs: [['theory', '원리를 설명하는 그림']],
+    guide: '탐구에 필요한 개념·원리·공식을 정리합니다. 교과서나 자료에서 찾은 내용은 출처를 밝힙니다. 탐구 문제나 가설이 있으면 여기에 씁니다.' },
+  { k: 'method', title: '탐구 방법', from: 'activity', rec: [350, 650], figs: [['method', '실험 장치·회로·제작 과정 사진']],
+    guide: '다른 사람이 보고 똑같이 따라 할 수 있을 만큼 씁니다. 준비물, 바꾼 조건(조작 변인)과 같게 유지한 조건(통제 변인), 측정한 것, 순서, 반복 횟수를 넣습니다.' },
+  { k: 'result', title: '탐구 결과', rec: [350, 650], figs: [['result', '결과 그래프나 표'], ['resultb', '두 번째 그래프·결과물 사진']],
+    guide: '측정값과 관찰한 사실을 수치와 함께 씁니다. 그래프나 표는 꼭 넣고, 글에서 “그림 2와 같이”처럼 그림 번호로 가리킵니다. 생각이나 해석은 다음 칸에 씁니다.' },
+  { k: 'conclusion', title: '결론 및 논의', from: 'insight', rec: [250, 500], key: true,
+    guide: '결과가 뜻하는 바를 씁니다. 왜 그런 결과가 나왔는지 원리로 설명하고, 처음 세운 목적이나 가설에 답합니다.' },
+  { k: 'difficulty', title: '탐구의 어려움과 한계', from: 'difficulty', rec: [200, 400],
+    guide: '진행하면서 부딪힌 문제와 해결한 방법을 쓰고, 끝까지 해결하지 못해 결과를 해석할 때 주의할 점(한계)도 씁니다.' },
+  { k: 'insight', title: '느낀 점 및 후속 탐구', from: 'future', rec: [200, 400],
+    guide: '이번 탐구로 배운 점과, 이어서 탐구해 보고 싶은 주제를 구체적으로 씁니다.' },
 ];
-const POSTER_TEXT_MAX = 1200;
+const POSTER_FIGS = POSTER_SECS.flatMap(q => (q.figs || []).map(([slot, hint]) => ({ slot, hint, sec: q.k })));
+const POSTER_TEXT_MAX = 1800;
 const posterDefaults = team => ({
-  title: team.topic || '', sub: '', theme: 'green', layout: 'port', sources: '',
-  ...Object.fromEntries(POSTER_SECS.flatMap(q => [[`t_${q.k}`, ''], [`c_${q.k}`, '']])),
+  title: team.topic || '', sub: '', affil: '', abstract: '', theme: 'navy', layout: 'port3', sources: '',
+  ...Object.fromEntries(POSTER_SECS.map(q => [`t_${q.k}`, ''])),
+  ...Object.fromEntries(POSTER_FIGS.map(f => [`c_${f.slot}`, ''])),
 });
 
 // {main, photos} 또는 새 보안 규칙이 아직 없으면 null
@@ -1408,39 +1418,51 @@ async function shrinkPhoto(file) {
 
 function posterHtml(team, d, photos) {
   const th = POSTER_THEMES.find(t => t.k === d.theme) || POSTER_THEMES[0];
-  const secs = POSTER_SECS.filter(q => (d[`t_${q.k}`] || '').trim() || photos[q.k]);
+  const lay = POSTER_LAYOUTS.find(l => l.k === d.layout) || POSTER_LAYOUTS[0];
+  const paras = t => t.trim().split(/\n+/).map(x => `<p>${esc(x.trim())}</p>`).join('');
+  const has = q => (d[`t_${q.k}`] || '').trim() || (q.figs || []).some(([slot]) => photos[slot]);
+  let fig = 0;
+  const figure = slot => {
+    if (!photos[slot]) return '';
+    fig += 1;
+    return `<figure><img src="${esc(photos[slot])}" alt=""><figcaption><b>그림 ${fig}.</b> ${esc((d[`c_${slot}`] || '').trim())}</figcaption></figure>`;
+  };
+  const secs = POSTER_SECS.filter(has);
   return `
-    <div class="poster ${d.layout === 'land' ? 'land' : ''}" style="--pc:${th.c};--pcs:${th.s}">
+    <div class="poster ${lay.cls}" style="--pc:${th.c};--pcs:${th.s}">
       <div class="p-head">
-        <div class="p-kicker">SLAT 학교주도활동 · 주제 탐구 프로젝트</div>
         <h1>${esc(d.title) || '<span class="p-empty">제목을 입력하세요</span>'}</h1>
         ${(d.sub || '').trim() ? `<div class="p-sub">${esc(d.sub)}</div>` : ''}
-        <div class="p-team"><b>${esc(team.name)}</b>${team.members.map(m => `<span>${esc(m.name)}</span>`).join('')}</div>
+        <div class="p-auth">${team.members.map(m => esc(m.name)).join(', ')} <span>(${esc(team.name)})</span></div>
+        <div class="p-affil">${esc((d.affil || '').trim() || 'SLAT 학교주도활동 주제 탐구 프로젝트')}</div>
       </div>
+      ${(d.abstract || '').trim() ? `<div class="p-abs"><b>초록</b><div>${paras(d.abstract)}</div></div>` : ''}
       <div class="p-body">
         ${secs.map((q, i) => `
           <section class="p-sec ${q.key ? 'key' : ''}">
-            <h2><span>${i + 1}</span>${esc(q.title)}</h2>
-            ${(d[`t_${q.k}`] || '').trim() ? `<p>${esc(d[`t_${q.k}`].trim())}</p>` : ''}
-            ${photos[q.k] ? `<figure><img src="${esc(photos[q.k])}" alt="">${(d[`c_${q.k}`] || '').trim() ? `<figcaption>${esc(d[`c_${q.k}`])}</figcaption>` : ''}</figure>` : ''}
-          </section>`).join('') || '<p class="p-empty">왼쪽(위)에 내용을 쓰면 여기에 포스터가 만들어집니다.</p>'}
-        ${(d.sources || '').trim() ? `<section class="p-sec p-src"><h3>참고 자료</h3><p>${esc(d.sources.trim())}</p></section>` : ''}
+            <h2>${i + 1}. ${esc(q.title)}</h2>
+            ${(d[`t_${q.k}`] || '').trim() ? `<div class="p-txt">${paras(d[`t_${q.k}`])}</div>` : ''}
+            ${(q.figs || []).map(([slot]) => figure(slot)).join('')}
+          </section>`).join('') || '<p class="p-empty">내용을 쓰면 여기에 포스터가 만들어집니다.</p>'}
+        ${(d.sources || '').trim() ? `<section class="p-sec p-ref"><h2>참고 문헌</h2><div class="p-txt">${paras(d.sources)}</div></section>` : ''}
       </div>
+      <div class="p-foot"><span>SLAT 학교주도활동 · 주제 탐구 프로젝트 포스터 발표</span><span>${new Date().getFullYear()}</span></div>
     </div>`;
 }
 
-// 글자 크기를 줄여 가며 한 장에 들어가게 맞춘다. 끝까지 넘치면 false.
+// 글자 크기를 줄여 가며 한 장에 들어가게 맞춘다. 'over'(끝까지 넘침) / 'loose'(가장 큰 글자로도 남음) / 'ok'
 function fitPoster(el) {
   const body = el.querySelector('.p-body');
   const over = () => body.scrollWidth > body.clientWidth + 1 || body.scrollHeight > body.clientHeight + 1;
-  for (const ph of [78, 62, 48]) {
-    el.style.setProperty('--ph', `${ph}mm`);
-    for (let pt = 16; pt >= 8.5; pt -= 0.5) {
-      el.style.setProperty('--pf', `${pt}pt`);
-      if (!over()) return true;
+  // 글자를 줄이기 전에 그림 높이부터 줄여 본다(글이 읽히는 것이 더 중요하다).
+  for (let pt = 11.5; pt >= 7.5; pt -= 0.25) {
+    el.style.setProperty('--pf', `${pt}pt`);
+    for (const ph of [72, 58, 46]) {
+      el.style.setProperty('--ph', `${ph}mm`);
+      if (!over()) return ph === 72 && pt === 11.5 ? 'loose' : 'ok';
     }
   }
-  return false;
+  return 'over';
 }
 
 async function renderPoster(teamId) {
@@ -1460,6 +1482,12 @@ async function renderPoster(teamId) {
   const who = isTeacher ? '담당 교사' : `${me.sid} ${me.name}`;
   const ref = part => doc(db, 'teams', teamId, 'poster', part);
   const chip = (name, value, cur, label, style = '') => `<label class="pick" ${style}><input type="radio" name="${name}" value="${value}" ${cur === value ? 'checked' : ''}>${esc(label)}</label>`;
+  const figRow = ({ slot, hint }) => `
+    <div class="photo-row">
+      <label class="btn btn-sm">🖼 그림 ${photos[slot] ? '바꾸기' : '넣기'}<input type="file" accept="image/*" data-photo="${slot}" hidden></label>
+      ${photos[slot] ? `<button type="button" class="btn-sm btn-danger" data-rm="${slot}">빼기</button>` : `<span class="small muted">${esc(hint)}</span>`}
+    </div>
+    ${photos[slot] ? `<input type="text" data-k="c_${slot}" maxlength="80" placeholder="그림 설명 (번호는 자동으로 붙습니다. 예: 환기 조건별 농도 변화)" value="${esc(d[`c_${slot}`])}" style="margin-top:6px">` : ''}`;
 
   page(`
     <div class="no-print">
@@ -1473,34 +1501,39 @@ async function renderPoster(teamId) {
     <div class="poster-layout">
       <form class="card no-print" id="poster-form">
         <div class="poster-tips">
-          <b>이렇게 만들면 보기 좋습니다</b>
+          <b>학회 포스터 발표 형식으로 만듭니다</b>
           <ul>
-            <li>글은 짧게 씁니다. 칸마다 적힌 글자 수를 넘기지 마세요.</li>
-            <li>사진은 2장 이상 넣습니다. 탐구 결과에는 그래프나 표를 넣으세요.</li>
-            <li>사진은 밝은 곳에서 가까이 찍고, 그래프는 화면을 캡처해서 올립니다.</li>
-            <li>글자 크기와 배치는 자동으로 맞춰집니다. 오른쪽(아래) 미리보기를 보면서 쓰세요.</li>
+            <li>포스터 한 장만 보고도 무엇을, 어떻게 탐구해서, 무엇을 알아냈는지 알 수 있어야 합니다.</li>
+            <li>문장은 “~하였다, ~이다”로 끝내고, “열심히 했다” 같은 말 대신 수치와 사실을 씁니다.</li>
+            <li>칸마다 권장 글자 수가 있습니다. 모자라면 포스터가 비어 보이니 채워서 쓰세요.</li>
+            <li>그래프와 표는 결과에 꼭 넣습니다. 그림 번호는 자동으로 붙으니 글에서 “그림 2와 같이”로 가리키세요.</li>
+            <li>글자 크기와 배치는 자동으로 맞춰집니다. 미리보기를 보면서 쓰세요.</li>
           </ul>
         </div>
         <div class="field"><label>색</label><div class="picks">${POSTER_THEMES.map(t => chip('theme', t.k, d.theme, t.name, `style="--dot:${t.c}"`)).join('')}</div></div>
-        <div class="field"><label>방향</label><div class="picks">${POSTER_LAYOUTS.map(l => chip('layout', l.k, d.layout, l.name)).join('')}</div></div>
-        <div class="field"><label for="p-title">제목 <span class="hint">탐구 주제나 탐구 이름</span></label><input type="text" id="p-title" data-k="title" maxlength="60" value="${esc(d.title)}"></div>
-        <div class="field"><label for="p-sub">한 줄 소개 <span class="hint">안 써도 됩니다. 탐구 결과를 한 문장으로</span></label><input type="text" id="p-sub" data-k="sub" maxlength="80" value="${esc(d.sub)}"></div>
+        <div class="field"><label>판형</label><div class="picks">${POSTER_LAYOUTS.map(l => chip('layout', l.k, d.layout, l.name)).join('')}</div></div>
+        <div class="field"><label for="p-title">제목 <span class="hint">무엇을 탐구했는지 드러나게</span></label><input type="text" id="p-title" data-k="title" maxlength="60" value="${esc(d.title)}"></div>
+        <div class="field"><label for="p-sub">부제 <span class="hint">안 써도 됩니다</span></label><input type="text" id="p-sub" data-k="sub" maxlength="80" value="${esc(d.sub)}"></div>
+        <div class="field"><label for="p-affil">소속 <span class="hint">예: ○○고등학교 1학년</span></label><input type="text" id="p-affil" data-k="affil" maxlength="60" value="${esc(d.affil)}"></div>
+        <div class="field poster-sec">
+          <label for="p-abstract">초록</label>
+          <p class="guide">포스터 전체를 3~4문장으로 줄인 글입니다. 무엇을 알아보려고, 어떻게 탐구했고, 무엇을 알아냈는지 씁니다. 다른 칸을 다 쓴 뒤 마지막에 쓰는 것이 좋습니다.</p>
+          <textarea id="p-abstract" data-k="abstract" rows="5" maxlength="600">${esc(d.abstract)}</textarea>
+          <div class="report-under"><span></span><span class="count" data-pcount="abstract"></span></div>
+        </div>
         ${POSTER_SECS.map((q, i) => `
           <div class="field poster-sec" data-sec="${q.k}">
             <label for="p-t-${q.k}">${i + 1}. ${esc(q.title)}</label>
             <p class="guide">${esc(q.guide)}</p>
-            <textarea id="p-t-${q.k}" data-k="t_${q.k}" rows="5" maxlength="${POSTER_TEXT_MAX}">${esc(d[`t_${q.k}`])}</textarea>
+            <textarea id="p-t-${q.k}" data-k="t_${q.k}" rows="7" maxlength="${POSTER_TEXT_MAX}">${esc(d[`t_${q.k}`])}</textarea>
             <div class="report-under">
               ${myReport && q.from && (myReport[q.from] || '').trim() ? `<button type="button" class="btn-sm" data-from="${q.k}">내 최종 보고서에서 가져오기</button>` : '<span></span>'}
               <span class="count" data-pcount="${q.k}"></span>
             </div>
-            <div class="photo-row">
-              <label class="btn btn-sm">📷 사진 ${photos[q.k] ? '바꾸기' : '넣기'}<input type="file" accept="image/*" data-photo="${q.k}" hidden></label>
-              ${photos[q.k] ? `<button type="button" class="btn-sm btn-danger" data-rm="${q.k}">사진 빼기</button>` : `<span class="small muted">${q.photo ? `추천: ${esc(q.photo)}` : '없어도 됩니다'}</span>`}
-            </div>
-            ${photos[q.k] ? `<input type="text" data-k="c_${q.k}" maxlength="60" placeholder="사진 설명 (예: 그림 1. 조건별 농도 변화)" value="${esc(d[`c_${q.k}`])}" style="margin-top:6px">` : ''}
+            ${POSTER_FIGS.filter(f => f.sec === q.k).map(figRow).join('')}
           </div>`).join('')}
-        <div class="field"><label for="p-src">참고 자료 <span class="hint">안 써도 됩니다. 책·기사 이름을 쉼표로 이어서</span></label><input type="text" id="p-src" data-k="sources" maxlength="300" value="${esc(d.sources)}"></div>
+        <div class="field poster-sec"><label for="p-src">참고 문헌 <span class="hint">한 줄에 하나씩. 지은이, 제목, 출판사·사이트, 연도</span></label>
+          <textarea id="p-src" data-k="sources" rows="3" maxlength="500">${esc(d.sources)}</textarea></div>
       </form>
       <div class="poster-side">
         <p class="err no-print" id="p-over"></p>
@@ -1526,17 +1559,22 @@ async function renderPoster(teamId) {
     const el = stage.firstElementChild;
     pageStyle.textContent = `@page { size: ${d.layout === 'land' ? '364mm 257mm' : '257mm 364mm'}; margin: 0; }`;
     const fit = () => {
-      $('#p-over').textContent = fitPoster(el) ? '' : '⚠ 내용이 한 장에 다 들어가지 않습니다. 글을 줄이거나 사진을 빼 주세요.';
+      const r = fitPoster(el);
+      const msg = $('#p-over');
+      msg.className = `no-print ${r === 'over' ? 'err' : 'small muted'}`;
+      msg.textContent = r === 'over' ? '⚠ 내용이 한 장에 다 들어가지 않습니다. 글을 줄이거나 그림을 빼 주세요.'
+        : r === 'loose' ? '아직 빈 곳이 많습니다. 탐구 방법과 결과를 더 자세히 쓰거나 그림을 넣으세요.' : '';
       scale();
     };
     fit();
     el.querySelectorAll('img').forEach(im => { if (!im.complete) im.onload = fit; });
   };
-  const counts = () => POSTER_SECS.forEach(q => {
-    const n = $(`#p-t-${q.k}`).value.trim().length;
+  const recs = [{ k: 'abstract', id: '#p-abstract', rec: [150, 300] }, ...POSTER_SECS.map(q => ({ k: q.k, id: `#p-t-${q.k}`, rec: q.rec }))];
+  const counts = () => recs.forEach(q => {
+    const n = $(q.id).value.trim().length;
     const el = $(`[data-pcount="${q.k}"]`);
-    el.textContent = `${n}자 (권장 ${q.rec[0]}~${q.rec[1]}자)`;
-    el.classList.toggle('over', n > q.rec[1]);
+    el.textContent = `${n}자 (권장 ${q.rec[0]}~${q.rec[1]}자)${n && n < q.rec[0] ? ' · 더 써야 합니다' : ''}`;
+    el.classList.toggle('over', n > q.rec[1] || (n > 0 && n < q.rec[0]));
   });
   draw();
   counts();
@@ -1562,7 +1600,7 @@ async function renderPoster(teamId) {
     if (ta.value.trim() && !confirm('지금 쓴 내용을 지우고 내 최종 보고서의 답으로 바꿀까요?')) return;
     ta.value = myReport[q.from].slice(0, POSTER_TEXT_MAX);
     ta.dispatchEvent(new Event('input', { bubbles: true }));
-    toast('가져왔습니다. 포스터에 맞게 짧게 줄여 주세요.');
+    toast('가져왔습니다. 포스터 문체(~하였다)에 맞게 고쳐 쓰세요.');
   });
 
   // 글 저장: 바뀐 항목만 보내서 다른 팀원이 고친 다른 칸을 덮어쓰지 않는다.
@@ -1583,7 +1621,7 @@ async function renderPoster(teamId) {
   $('#p-save').onclick = async () => { if (await save()) toast('저장했습니다.'); };
   $('#p-print').onclick = () => window.print();
 
-  // 사진은 고르는 즉시 저장한다. 화면을 다시 그려야 해서 글도 함께 저장해 둔다.
+  // 그림은 고르는 즉시 저장한다. 화면을 다시 그려야 해서 글도 함께 저장해 둔다.
   $$('[data-photo]').forEach(inp => inp.onchange = async () => {
     const file = inp.files[0];
     if (!file) return;
@@ -1591,9 +1629,9 @@ async function renderPoster(teamId) {
     try {
       const data = await shrinkPhoto(file);
       if (me.preview) { $('#p-err').textContent = PREVIEW_BLOCK; return; }
-      toast('사진을 올리는 중…');
+      toast('그림을 올리는 중…');
       await setDoc(ref(`photo-${inp.dataset.photo}`), { data, updatedAt: new Date().toISOString() });
-      if (await save()) { toast('사진을 넣었습니다.'); route(); }
+      if (await save()) { toast('그림을 넣었습니다.'); route(); }
     } catch (e) {
       fail(e);
     }

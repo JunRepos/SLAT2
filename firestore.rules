@@ -82,15 +82,16 @@ service cloud.firestore {
       return d.get(k, '') is string && d.get(k, '').size() <= n;
     }
     function posterMainOk(d) {
-      return d.keys().hasOnly(['title', 'sub', 'theme', 'layout', 'sources', 'updatedAt', 'updatedBy',
-          't_motive', 't_method', 't_result', 't_difficulty', 't_insight',
-          'c_motive', 'c_method', 'c_result', 'c_difficulty', 'c_insight'])
-        && ptext(d, 'title', 100) && ptext(d, 'sub', 200) && ptext(d, 'theme', 20) && ptext(d, 'layout', 20)
-        && ptext(d, 'sources', 500) && ptext(d, 'updatedAt', 40) && ptext(d, 'updatedBy', 60)
-        && ptext(d, 't_motive', 1500) && ptext(d, 't_method', 1500) && ptext(d, 't_result', 1500)
-        && ptext(d, 't_difficulty', 1500) && ptext(d, 't_insight', 1500)
-        && ptext(d, 'c_motive', 100) && ptext(d, 'c_method', 100) && ptext(d, 'c_result', 100)
-        && ptext(d, 'c_difficulty', 100) && ptext(d, 'c_insight', 100);
+      return d.keys().hasOnly(['title', 'sub', 'affil', 'abstract', 'theme', 'layout', 'sources', 'updatedAt', 'updatedBy',
+          't_motive', 't_theory', 't_method', 't_result', 't_conclusion', 't_difficulty', 't_insight',
+          'c_theory', 'c_method', 'c_result', 'c_resultb'])
+        && ptext(d, 'title', 100) && ptext(d, 'sub', 200) && ptext(d, 'affil', 100) && ptext(d, 'abstract', 800)
+        && ptext(d, 'theme', 20) && ptext(d, 'layout', 20)
+        && ptext(d, 'sources', 600) && ptext(d, 'updatedAt', 40) && ptext(d, 'updatedBy', 60)
+        && ptext(d, 't_motive', 2000) && ptext(d, 't_theory', 2000) && ptext(d, 't_method', 2000)
+        && ptext(d, 't_result', 2000) && ptext(d, 't_conclusion', 2000)
+        && ptext(d, 't_difficulty', 2000) && ptext(d, 't_insight', 2000)
+        && ptext(d, 'c_theory', 100) && ptext(d, 'c_method', 100) && ptext(d, 'c_result', 100) && ptext(d, 'c_resultb', 100);
     }
     function posterPhotoOk(d) {
       return d.keys().hasOnly(['data', 'updatedAt'])

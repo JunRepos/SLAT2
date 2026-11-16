@@ -309,31 +309,40 @@ summary { cursor: pointer; color: var(--accent); font-size: 14px; font-weight: 6
 .pick:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); font-weight: 700; }
 
 .poster {
-  width: 257mm; height: 364mm; padding: 9mm; background: #fff; color: #1b1b1b; overflow: hidden;
+  width: 257mm; height: 364mm; padding: 8mm; background: #fff; color: #111; overflow: hidden;
   display: flex; flex-direction: column; transform-origin: top left;
-  font-size: var(--pf, 12pt); line-height: 1.55; word-break: keep-all;
+  font-size: var(--pf, 10pt); line-height: 1.5; word-break: keep-all;
   -webkit-print-color-adjust: exact; print-color-adjust: exact;
 }
 .poster.land { width: 364mm; height: 257mm; }
-.poster .p-head { background: var(--pc); color: #fff; border-radius: 3mm; padding: 7mm 9mm 6mm; }
-.poster .p-kicker { font-size: 9.5pt; opacity: .85; letter-spacing: .04em; }
-.poster h1 { font-size: 27pt; font-weight: 800; line-height: 1.22; margin: 1.5mm 0 0; }
-.poster.land h1 { font-size: 25pt; }
-.poster .p-sub { font-size: 13pt; margin-top: 2mm; opacity: .95; }
-.poster .p-team { margin-top: 4mm; padding-top: 3mm; border-top: .3mm solid rgba(255, 255, 255, .45); font-size: 11pt; display: flex; flex-wrap: wrap; gap: 1mm 4mm; }
-.poster .p-team b { font-weight: 800; margin-right: 2mm; }
-.poster .p-body { flex: 1; min-height: 0; margin-top: 6mm; column-count: 2; column-gap: 7mm; column-fill: auto; column-rule: .2mm solid #ddd; }
-.poster.land .p-body { column-count: 3; }
-.poster .p-sec { margin-bottom: 5mm; }
-.poster .p-sec h2 { font-size: 1.28em; font-weight: 800; color: var(--pc); border-bottom: .6mm solid var(--pc); padding-bottom: 1mm; margin: 0 0 2mm; display: flex; align-items: center; gap: 2mm; break-after: avoid; }
-.poster .p-sec h2 span { flex: none; width: 1.5em; height: 1.5em; border-radius: 50%; background: var(--pc); color: #fff; display: inline-grid; place-items: center; font-size: .78em; }
-.poster .p-sec p { margin: 0; white-space: pre-wrap; orphans: 2; widows: 2; }
-.poster .p-sec.key { background: var(--pcs); border-radius: 2.5mm; padding: 4mm; -webkit-box-decoration-break: clone; box-decoration-break: clone; break-inside: avoid; }
-.poster figure { margin: 3mm 0 0; break-inside: avoid; }
-.poster figure img { display: block; width: 100%; max-height: var(--ph, 78mm); object-fit: contain; border-radius: 1.5mm; background: #f3f3f3; }
-.poster figcaption { font-size: .8em; color: #555; text-align: center; margin-top: 1mm; }
-.poster .p-src { margin-bottom: 0; font-size: .78em; color: #555; break-inside: avoid; }
-.poster .p-src h3 { font-size: 1em; margin: 0 0 .5mm; color: #333; }
+.poster .p-head { background: var(--pc); color: #fff; padding: 6mm 8mm 5mm; text-align: center; box-shadow: 0 .8mm 0 #fff, 0 1.5mm 0 var(--pc); margin-bottom: 1.5mm; }
+.poster h1 { font-size: 23pt; font-weight: 800; line-height: 1.25; margin: 0; letter-spacing: -.01em; }
+.poster.land .p-head { padding: 4mm 8mm 3.5mm; }
+.poster.land h1 { font-size: 20pt; }
+.poster.land .p-sub { font-size: 11.5pt; margin-top: 1mm; }
+.poster.land .p-auth { margin-top: 2mm; font-size: 11pt; }
+.poster.land .p-affil { display: inline; }
+.poster .p-sub { font-size: 12.5pt; margin-top: 1.5mm; opacity: .95; }
+.poster .p-auth { margin-top: 3.5mm; font-size: 11.5pt; font-weight: 600; }
+.poster .p-auth span { font-weight: 400; opacity: .9; }
+.poster .p-affil { margin-top: .5mm; font-size: 9.5pt; opacity: .9; }
+.poster .p-abs { margin-top: 3.5mm; border: .3mm solid var(--pc); background: var(--pcs); padding: 2.5mm 4mm; display: grid; grid-template-columns: auto 1fr; gap: 4mm; align-items: start; font-size: .96em; }
+.poster .p-abs b { color: var(--pc); font-size: 1.1em; font-weight: 800; white-space: nowrap; }
+.poster .p-body { flex: 1; min-height: 0; margin-top: 4mm; column-count: 2; column-gap: 6mm; column-fill: auto; }
+.poster.c3 .p-body { column-count: 3; column-gap: 5mm; }
+.poster.c4 .p-body { column-count: 4; column-gap: 5mm; }
+.poster .p-sec { margin-bottom: 3.5mm; }
+.poster .p-sec h2 { background: var(--pc); color: #fff; font-size: 1.1em; font-weight: 700; line-height: 1.3; padding: 1.1mm 2.5mm; margin: 0 0 1.8mm; break-after: avoid; }
+.poster p { margin: 0 0 1.2mm; text-align: justify; word-break: normal; orphans: 2; widows: 2; }
+.poster p:last-child { margin-bottom: 0; }
+.poster .p-sec.key .p-txt { background: var(--pcs); border-left: 1mm solid var(--pc); padding: 2.5mm 3mm; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.poster figure { margin: 2mm 0 2.5mm; padding: 1.5mm; border: .2mm solid #bdbdbd; break-inside: avoid; }
+.poster figure img { display: block; width: 100%; max-height: var(--ph, 72mm); object-fit: contain; }
+.poster figcaption { font-size: .86em; text-align: center; margin-top: 1.2mm; color: #222; line-height: 1.35; }
+.poster .p-ref { margin-bottom: 0; }
+.poster .p-ref .p-txt { font-size: .86em; }
+.poster .p-ref p { text-align: left; padding-left: 1.2em; text-indent: -1.2em; }
+.poster .p-foot { margin-top: 2mm; border-top: .3mm solid var(--pc); padding-top: 1.2mm; font-size: 7.5pt; color: #555; display: flex; justify-content: space-between; }
 .poster .p-empty { opacity: .5; }
 
 @media print {
