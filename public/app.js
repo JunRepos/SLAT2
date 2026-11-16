@@ -188,6 +188,7 @@ async function fetchAllTeams() {
 async function saveLog(team, no, action, fields, baseRev) {
   const ref = doc(db, 'teams', team.id, 'logs', String(no));
   const me = state.me;
+  if (me.preview) throw new Error(PREVIEW_BLOCK);
   const who = me.role === 'teacher' ? '담당 교사' : `${me.sid} ${me.name}`;
   await runTransaction(db, async tx => {
     const snap = await tx.get(ref);
@@ -334,6 +335,26 @@ async function logout() {
   location.hash = '#/login';
 }
 
+// ---------- 학생 화면 미리보기 (교사) ----------
+// 교사 로그인은 그대로 둔 채 화면만 그 학생이 보는 대로 그린다. 미리보기 중에는 저장이 막힌다.
+
+async function startPreview(teamId, sid) {
+  const snap = await getDoc(doc(db, 'teams', teamId));
+  const m = snap.exists() && snap.data().members.find(x => x.sid === sid);
+  if (!m) throw new Error('팀원을 찾을 수 없습니다.');
+  state.teacher = state.me;
+  state.me = { role: 'student', uid: state.me.uid, sid, name: m.name, teamId, preview: true };
+  location.replace(`#/team/${teamId}`);
+}
+
+function endPreview() {
+  state.me = state.teacher;
+  state.teacher = null;
+  location.hash = '#/dashboard';
+}
+
+const PREVIEW_BLOCK = '미리보기 중에는 저장되지 않습니다. 실제로 고치려면 교사 화면으로 돌아가세요.';
+
 // ---------- 레이아웃 ----------
 
 function page(html, active) {
@@ -345,10 +366,11 @@ function page(html, active) {
     <header class="topbar"><div class="wrap topbar-in">
       <a class="brand" href="#/">SLAT<span>학교주도활동 기록장</span></a>
       <nav>${links.map(([k, h, t]) => `<a href="${h}" class="${k === active ? 'active' : ''}">${t}</a>`).join('')}</nav>
-      <div class="who">${me.role === 'teacher' ? '담당 교사' : esc(`${me.sid} ${me.name}`)}${USE_EMULATOR ? ' <span class="badge st-draft">에뮬레이터</span>' : ''}<button class="btn-ghost" id="logout">로그아웃</button></div>
+      <div class="who">${me.role === 'teacher' ? '담당 교사' : esc(`${me.sid} ${me.name}`)}${USE_EMULATOR ? ' <span class="badge st-draft">에뮬레이터</span>' : ''}<button class="btn-ghost" id="logout">${me.preview ? '미리보기 끝내기' : '로그아웃'}</button></div>
     </div></header>
+    ${me.preview ? `<div class="preview-bar no-print"><div class="wrap">👀 <b>${esc(me.name)}</b> 학생에게 보이는 화면입니다. 눌러 보고 써 볼 수 있지만 저장은 되지 않습니다.</div></div>` : ''}
     <main class="wrap">${html}</main>`;
-  $('#logout').onclick = logout;
+  $('#logout').onclick = me.preview ? endPreview : logout;
 }
 
 // ---------- 라우터 ----------
@@ -364,6 +386,7 @@ async function route() {
   const home = me.role === 'teacher' ? '#/dashboard' : `#/team/${me.teamId}`;
   try {
     if (me.role === 'teacher') {
+      if (parts[0] === 'preview' && parts[1] && parts[2]) return await startPreview(parts[1], parts[2]);
       if (parts[0] === 'dashboard') return await renderDashboard();
       if (parts[0] === 'pins') return await renderPins();
       if (parts[0] === 'attendance') return await renderAttendance(Number(parts[1]) || 0);
@@ -690,6 +713,7 @@ async function renderTeam(teamId) {
         </div>
       </div>
       <div class="chips">${team.members.map(m => `<span class="chip">${m.sid === team.leaderSid ? '👑 ' : ''}<b>${esc(m.name)}</b> ${esc(m.sid)}${m.role ? ` · ${esc(m.role)}` : ''}</span>`).join('')}</div>
+      ${me.role === 'teacher' && team.members.length ? `<div class="small muted" style="margin-top:10px">👀 학생 화면 미리보기: ${team.members.map(m => `<a href="#/preview/${team.id}/${esc(m.sid)}">${esc(m.name)}</a>`).join(' · ')}</div>` : ''}
       <div class="progress-row">
         <div><div class="small muted">제출 ${team.sessions.filter(s => DONE.includes(logs[s.no].status)).length} / ${team.sessions.length}차시 · 확인 완료 ${count('approved')}</div>
           <div class="progress">
@@ -705,7 +729,7 @@ async function renderTeam(teamId) {
     ${myReport ? `<a class="session report-banner" href="#/team/${team.id}/report">
         <div class="no"><b>📝</b><span>개인</span></div>
         <div><div class="plan">최종 보고서 (개인별 작성)</div>
-          <div class="meta">${myReport.status === 'revise' ? '선생님이 보완을 요청했습니다. 고친 뒤 다시 제출하세요.' : '질문 ${REPORT_QS.length}개에 각자 답을 써서 제출합니다.'}</div></div>
+          <div class="meta">${myReport.status === 'revise' ? '선생님이 보완을 요청했습니다. 고친 뒤 다시 제출하세요.' : `탐구 이름·최종 목표와 질문 ${REPORT_QS.length}개에 각자 답을 써서 제출합니다.`}</div></div>
         <div class="right"><span class="badge ${STATUS[myReport.status].cls}">${STATUS[myReport.status].label}</span><span class="btn btn-sm">${myReport.status === 'approved' ? '보기' : myReport.status === 'empty' ? '작성하기' : '이어서 작성'}</span></div>
       </a>` : ''}
     <div class="section-title"><h2>차시별 활동 기록</h2><span class="muted small">매 차시가 끝나면 그날 한 활동을 기록하고 [제출]하세요.</span></div>
@@ -889,56 +913,77 @@ const REPORT_QS = [
       '진로 연계: 관심 분야인 ~에서 ~ 기사를 봤는데 흥미를 느껴서 탐구해 보고자 ~를 주제로 정했다.',
       '실생활 연계: 평소 ~를 하다가 ~가 궁금했는데 탐구해 보고 싶어서 ~를 주제로 정했다.',
     ],
-    example: '통합과학 시간에 세포 호흡을 하면 이산화탄소가 나온다는 것을 배웠다. 그때 선생님이 5교시에 교실이 답답하고 졸린 것도 이산화탄소 때문일 수 있다고 하셔서 흥미가 생겼다. 우리 교실은 실제로 농도가 얼마나 되는지, 어떻게 환기해야 빨리 낮아지는지 직접 재 보고 싶어서 ‘환기 방법에 따른 교실 이산화탄소 농도 변화’를 주제로 정했다.',
+    example: '통합과학 시간에 세포 호흡을 하면 이산화탄소가 나온다는 것을 배웠다. 그때 선생님이 5교시에 교실이 답답하고 졸린 것도 이산화탄소 때문일 수 있다고 하셔서 흥미가 생겼다. 생각해 보니 우리 반은 겨울에 춥다고 창문을 거의 열지 않는데, 서른 명 가까운 사람이 한 교실에서 계속 숨을 쉬면 농도가 꽤 높아질 것 같았다. 집에 와서 찾아보니 실내 이산화탄소 농도에 권고 기준이 있다는 것도 알게 되었다. 그래서 우리 교실은 실제로 농도가 얼마나 되는지, 그리고 쉬는 시간 10분 동안 어떻게 환기해야 가장 빨리 낮아지는지 직접 재 보고 싶어서 ‘환기 방법에 따른 교실 이산화탄소 농도 변화’를 주제로 정했다.',
   },
   {
     k: 'activity',
     title: '어떠한 활동을 하였는가? 어떤 역할을 맡아서 어떠한 것을 탐구하였는가?',
     guide: '팀 전체가 한 일 말고 내가 한 일을 쓰세요. 무엇을 어떤 방법으로 몇 번 했는지 구체적으로 씁니다.',
-    example: '나는 측정 장치를 만들고 데이터를 기록하는 역할을 맡았다. 아두이노에 이산화탄소 센서를 연결해서 1분마다 농도가 저장되게 만들었다. 창문만 열었을 때, 앞뒤 문만 열었을 때, 창문과 문을 다 열었을 때로 나누어 쉬는 시간 10분 동안 농도가 어떻게 변하는지 조건마다 3일씩 쟀다. 잰 값은 엑셀로 그래프를 그려서 어느 방법이 가장 빨리 낮아지는지 비교했다.',
+    example: '나는 측정 장치를 만들고 데이터를 기록하는 역할을 맡았다. 먼저 아두이노에 이산화탄소 센서를 연결하고, 1분마다 농도를 재서 SD 카드에 저장하는 코드를 짰다. 처음에는 값이 화면에만 나오고 저장이 안 돼서 예제 코드를 찾아보면서 세 번 정도 고쳤다. 장치가 완성된 뒤에는 창문만 열었을 때, 앞뒤 문만 열었을 때, 창문과 문을 다 열었을 때로 조건을 나누고, 쉬는 시간 10분 동안 농도가 어떻게 변하는지 조건마다 3일씩 모두 9일 동안 쟀다. 비교하려고 아무것도 열지 않은 날도 하루 쟀다. 잰 값은 엑셀에 옮겨서 조건별로 평균을 내고 꺾은선 그래프로 그렸다. 보고서에서는 탐구 방법과 결과 부분을 내가 썼다.',
   },
   {
     k: 'sources',
     title: '탐구하면서 어떤 자료를 찾아보았는가? 그 자료를 어디에 활용하였는가?',
     guide: '책, 교과서, 기사, 영상, 설명서 등 실제로 본 자료의 이름을 쓰세요. ‘인터넷 검색’이라고만 쓰면 안 됩니다.',
-    example: '통합과학 교과서의 세포 호흡 부분을 다시 읽고 사람이 많으면 이산화탄소가 왜 늘어나는지 정리했다. 센서 설명서를 찾아 읽었는데 전원을 켜고 바로 잰 값은 정확하지 않다고 되어 있어서, 켜고 몇 분 지난 뒤부터 재는 것으로 방법을 바꿨다. 환경부 자료에서 실내 이산화탄소 권고 기준을 찾아서 우리 교실 값이 높은 편인지 판단하는 데 썼다.',
+    example: '먼저 통합과학 교과서의 세포 호흡 부분을 다시 읽고 사람이 많으면 이산화탄소가 왜 늘어나는지 정리해서 보고서의 탐구 배경에 썼다. 센서를 처음 써 봐서 제조사 설명서를 찾아 읽었는데, 전원을 켜고 바로 잰 값은 정확하지 않다고 되어 있어서 켜고 몇 분 지난 뒤부터 재는 것으로 방법을 바꿨다. 아두이노로 SD 카드에 저장하는 방법은 유튜브 강의 영상을 보고 따라 하면서 배웠다. 환경부 자료에서 실내 이산화탄소 권고 기준을 찾아서 우리 교실 값이 높은 편인지 판단하는 기준으로 썼다. 또 교실 환기에 대한 신문 기사를 읽었는데, 바람이 통하게 양쪽을 열어야 한다는 내용이 있어서 ‘창문과 문을 다 여는 조건’을 추가하게 되었다.',
   },
   {
     k: 'difficulty',
     title: 'SLAT를 진행하는 중 어려움은 없었는가? 있었다면 그것을 해결하기 위해 어떤 것을 해 봤는가?',
     guide: '‘어려웠지만 열심히 했다’라고 쓰면 안 됩니다. 어떤 문제가 있었는지, 왜 그랬는지, 그래서 무엇을 바꿨는지, 바꾼 뒤에 어떻게 됐는지를 쓰세요.',
-    example: '처음에는 같은 조건으로 쟀는데도 날마다 값이 많이 달라서 비교를 할 수 없었다. 이유를 따져 보니 쉬는 시간에 교실에 남아 있는 사람 수가 매번 달랐고 센서를 놓는 자리도 달랐다. 그래서 센서를 교실 가운데 책상 위에 고정하고, 잴 때마다 교실에 남은 사람 수를 같이 적었다. 그렇게 한 뒤로는 같은 조건에서 값 차이가 줄어서 비교할 수 있었다.',
+    example: '가장 어려웠던 것은 같은 조건으로 쟀는데도 날마다 값이 많이 달라서 비교를 할 수 없었던 것이다. 처음에는 센서가 고장 난 줄 알고 다시 연결해 봤는데 똑같았다. 팀원들과 측정한 날의 상황을 하나씩 적어 보니, 쉬는 시간에 교실에 남아 있는 사람 수가 매번 달랐고 센서를 놓는 자리도 그때그때 달랐다. 그래서 센서를 교실 가운데 책상 위에 고정하고, 잴 때마다 교실에 남은 사람 수를 같이 적기로 했다. 사람 수가 너무 다른 날의 값은 빼고 다시 쟀다. 그렇게 한 뒤로는 같은 조건에서 값 차이가 줄어서 비교할 수 있었다. 또 체육 수업 때문에 교실이 비는 날이 있어서 계획보다 측정이 늦어졌는데, 점심시간에 한 번 더 재는 것으로 일정을 맞췄다.',
   },
   {
     k: 'teamwork',
     title: '팀원들과 화합을 이루어 프로젝트를 진행하기 위해서 노력한 것이 있는가?',
     guide: '‘사이좋게 지냈다’ 말고 실제로 한 행동을 쓰세요. 역할을 어떻게 나눴는지, 의견이 다를 때 어떻게 정했는지, 팀원을 어떻게 도왔는지 등.',
-    example: '쉬는 시간마다 재야 해서 한 사람만 계속 하게 되지 않도록 요일별로 당번을 정하자고 했다. 어떤 조건으로 잴지 의견이 달랐을 때는 각자 생각한 방법으로 하루씩 재 보고 결과를 보고 정했다. 코딩을 어려워하는 팀원이 있어서 내가 짠 코드에 한 줄씩 설명을 적어 주었다.',
+    example: '쉬는 시간마다 재야 해서 한 사람만 계속 하게 되면 불만이 생길 것 같았다. 그래서 요일별로 당번을 정하자고 내가 먼저 말했고, 당번표를 만들어 단체 대화방에 올렸다. 어떤 조건으로 잴지 의견이 달랐을 때는 말로만 하면 결론이 안 나서, 각자 생각한 방법으로 하루씩 재 보고 결과를 보고 정했다. 코딩을 어려워하는 팀원이 있어서 내가 짠 코드에 한 줄씩 설명을 적어 주었고, 나중에는 그 팀원도 혼자 장치를 켜고 값을 저장할 수 있게 되었다. 반대로 나는 그래프를 보기 좋게 만드는 것을 잘 못해서 그 부분은 다른 팀원에게 배웠다. 매 차시가 끝나면 5분 정도 모여서 다음 시간에 누가 무엇을 할지 정하고 헤어졌다.',
   },
   {
     k: 'insight',
     title: '탐구 결과 무엇을 알게 되었는가? 최종적으로 활동 결과물을 통해서 무엇을 느꼈는가?',
     guide: '알게 된 내용을 먼저 쓰세요(측정한 값이나 관찰한 것을 근거로). 느낀 점은 그 다음에 씁니다. ‘재미있었다’로 끝내면 안 됩니다.',
-    example: '창문과 문을 같이 열면 창문만 열 때보다 농도가 훨씬 빨리 내려간다는 것을 그래프로 확인했다. 환기하면 좋다는 건 원래 알았지만 직접 잰 숫자로 보니까 확실히 믿게 되었고 친구들에게도 설명할 수 있었다. 그리고 조건을 똑같이 맞추지 않으면 결과를 비교할 수 없다는 것을 실험하면서 알게 되었다.',
+    example: '아무것도 열지 않으면 쉬는 시간에도 농도가 거의 내려가지 않았고, 창문만 열면 천천히 내려갔다. 창문과 문을 같이 열면 창문만 열 때보다 훨씬 빨리 내려간다는 것을 그래프로 확인했다. 바람이 들어오는 곳과 나가는 곳이 둘 다 있어야 공기가 잘 바뀐다는 것을 알게 되었다. 환기하면 좋다는 건 원래 알았지만 직접 잰 숫자로 보니까 확실히 믿게 되었고, 반 친구들에게 쉬는 시간에 문도 같이 열자고 설명할 수 있었다. 그리고 조건을 똑같이 맞추지 않으면 결과를 비교할 수 없다는 것을 실험하면서 알게 되었다. 교과서에서 변인 통제를 배울 때는 당연한 말 같았는데 직접 해 보니 제일 어려운 부분이었다. 다만 9일밖에 재지 못해서 날씨나 바람의 영향은 확인하지 못한 것이 아쉽다.',
   },
   {
     k: 'poster',
     title: '활동 결과물에 대해서 발표나 전시를 할 계획이 있는가?',
     guide: 'B4 1장짜리 포스터를 만듭니다. 포스터에 무엇을 넣을지, 내가 맡을 부분은 무엇인지 쓰세요.',
-    example: 'B4 1장 포스터로 만들어서 복도 게시판에 붙일 계획이다. 왼쪽에는 탐구하게 된 계기와 측정 방법(장치 사진), 가운데에는 조건별 그래프, 오른쪽에는 결론을 넣는다. 나는 그래프를 맡고 다른 팀원이 디자인과 글을 맡아서 마지막 차시까지 완성하기로 했다.',
+    example: 'B4 1장 포스터로 만들어서 복도 게시판에 붙일 계획이다. 제목은 ‘쉬는 시간, 문도 같이 열어야 하는 이유’로 정했다. 왼쪽에는 탐구하게 된 계기와 측정 방법을 장치 사진과 함께 넣고, 가운데에는 조건별 농도 변화 그래프를 가장 크게 넣는다. 오른쪽에는 결론과 우리가 제안하는 환기 방법을 넣는다. 글이 많으면 아무도 안 읽을 것 같아서 그래프와 사진 위주로 만들기로 했다. 나는 그래프를 맡고 다른 팀원이 디자인과 글을 맡아서 마지막 차시까지 완성하기로 했다. 포스터를 붙인 뒤에는 우리 반에서 3분 정도 발표도 할 예정이다.',
   },
   {
     k: 'future',
     title: '이번 활동을 통해서 앞으로(2학년, 3학년 중) 추가적으로 탐구해 보고 싶은 것이 있는가?',
     guide: '이번에 해결하지 못한 것이나 활동하다가 새로 궁금해진 것을 쓰세요.',
-    example: '이번에는 이산화탄소만 쟀는데, 창문을 열면 바깥 미세먼지가 들어오지 않을까 하는 궁금증이 생겼다. 2학년 때는 미세먼지 센서를 추가해서 언제 환기하는 것이 좋은지 탐구해 보고 싶다. 농도가 높아지면 알려 주는 장치도 만들어 보고 싶다.',
+    example: '이번에는 이산화탄소만 쟀는데, 창문을 열면 바깥 미세먼지가 들어오지 않을까 하는 궁금증이 생겼다. 2학년 때는 미세먼지 센서를 추가해서 이산화탄소와 미세먼지를 같이 재고, 미세먼지가 많은 날에는 언제 얼마나 환기하는 것이 좋은지 탐구해 보고 싶다. 이번에 날씨와 바람의 영향을 확인하지 못했기 때문에 측정 기간도 한 달 정도로 늘리고 싶다. 또 농도가 기준보다 높아지면 소리나 불빛으로 알려 주는 장치를 만들어서 교실에 두고, 실제로 환기 횟수가 늘어나는지도 확인해 보고 싶다. 그러려면 정보 시간에 배우는 프로그래밍을 더 공부해야 할 것 같다.',
   },
+];
+// 번호 붙은 질문보다 먼저 쓰는 팀 공통 항목. 팀원끼리 똑같이 써야 한다(교사 화면에서 다르면 표시).
+const REPORT_COMMON = [
+  {
+    k: 'title',
+    title: '이번 SLAT 탐구의 이름',
+    guide: '우리 팀이 한 탐구에 이름을 붙이세요. 팀원끼리 상의해서 정하고, 팀원 모두 똑같이 써야 합니다.',
+    example: '환기 방법에 따른 교실 이산화탄소 농도 변화 탐구',
+    short: true,
+  },
+  {
+    k: 'goal',
+    title: '이 프로젝트의 최종 목표',
+    guide: '이 프로젝트에서 최종적으로 무엇을 알아내거나 만들려고 했는지 쓰세요. 이것도 팀원 모두 똑같이 써야 합니다.',
+    example: '환기 방법에 따라 교실의 이산화탄소 농도가 낮아지는 속도가 어떻게 다른지 직접 측정하고, 쉬는 시간 10분 안에 농도를 가장 빨리 낮출 수 있는 환기 방법을 찾아서 우리 반에 제안한다.',
+  },
+];
+// 저장·검사·내보내기에 쓰는 전체 항목. label은 화면과 CSV에 보이는 제목.
+const REPORT_FIELDS = [
+  ...REPORT_COMMON.map(q => ({ ...q, common: true, label: q.title })),
+  ...REPORT_QS.map((q, i) => ({ ...q, label: `${i + 1}. ${q.title}` })),
 ];
 const REPORT_MAX = 3000;
 
 const emptyReport = () => ({
   status: 'empty', feedback: '',
-  ...Object.fromEntries(REPORT_QS.map(q => [q.k, ''])),
+  ...Object.fromEntries(REPORT_FIELDS.map(q => [q.k, ''])),
 });
 
 async function fetchReport(teamId, sid) {
@@ -968,7 +1013,7 @@ function reportSheet(team, m, r) {
           <h2>${esc(m.name)} <span class="muted small">${esc(m.sid)}${m.role ? ` · ${esc(m.role)}` : ''}</span></h2></div>
         <div class="small muted">${r.submittedAt ? `제출 ${fmtDateTime(r.submittedAt)}` : ''} <span class="badge ${STATUS[r.status].cls}">${STATUS[r.status].label}</span></div>
       </div>
-      ${REPORT_QS.map((q, i) => block(`${i + 1}. ${q.title}`, r[q.k])).join('')}
+      ${REPORT_FIELDS.map(q => block(q.label, r[q.k])).join('')}
     </div>`;
 }
 
@@ -1042,9 +1087,9 @@ async function renderReport(teamId, sid) {
   const base = r.updatedAt || '';
   let restored = false;
   try {
-    const loc = JSON.parse(localStorage.getItem(draftKey) || 'null');
+    const loc = me.preview ? null : JSON.parse(localStorage.getItem(draftKey) || 'null');
     if (loc && loc.base === base) {
-      for (const q of REPORT_QS) {
+      for (const q of REPORT_FIELDS) {
         if (typeof loc[q.k] === 'string' && loc[q.k] !== r[q.k]) { r[q.k] = loc[q.k]; restored = true; }
       }
     } else if (loc) localStorage.removeItem(draftKey);
@@ -1060,7 +1105,7 @@ async function renderReport(teamId, sid) {
       <ul>
         <li>무엇을, 어떻게, 몇 번 했는지 <b>구체적으로</b> 씁니다.</li>
         <li>팀이 한 일이 아니라 <b>내가 한 일</b>을 씁니다.</li>
-        <li>질문마다 <b>3~5문장</b> 정도 씁니다.</li>
+        <li><b>탐구 이름</b>과 <b>최종 목표</b>는 팀원끼리 상의해서 모두 똑같이 씁니다. 나머지는 각자 씁니다.</li>
         <li>질문 아래 [작성 예시]는 다른 주제로 쓴 것입니다. 베끼지 말고 참고만 하세요.</li>
       </ul>
       ${restored ? '<p class="restored">저장하지 않고 닫았던 내용을 불러왔습니다. [임시저장]을 눌러야 저장됩니다.</p>' : ''}
@@ -1068,12 +1113,14 @@ async function renderReport(teamId, sid) {
         ${written.map(s => `<div class="readonly-block" style="margin:10px 0 0"><h3>${s.no}차시 · ${fmtDate(s.date)} · ${esc(s.plan)}</h3><div>${esc(logs[s.no].content)}</div></div>`).join('')}</details>` : ''}
     </div>
     <form class="card" id="report-form">
-      ${REPORT_QS.map((q, i) => `
-        <div class="field report-q">
-          <label for="r-${q.k}">${i + 1}. ${esc(q.title)}</label>
+      ${REPORT_FIELDS.map(q => `
+        <div class="field report-q ${q.common ? 'report-common' : ''}">
+          <label for="r-${q.k}">${esc(q.label)}${q.common ? ' <span class="badge st-submitted">팀원 동일</span>' : ''}</label>
           <p class="guide">${esc(q.guide)}</p>
           ${q.frames ? `<ul class="frames">${q.frames.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
-          <textarea id="r-${q.k}" rows="6" maxlength="${REPORT_MAX}">${esc(r[q.k])}</textarea>
+          ${q.short
+            ? `<input type="text" id="r-${q.k}" maxlength="100" value="${esc(r[q.k])}">`
+            : `<textarea id="r-${q.k}" rows="${q.common ? 3 : 6}" maxlength="${REPORT_MAX}">${esc(r[q.k])}</textarea>`}
           <div class="report-under"><details><summary>작성 예시 보기</summary><div class="example">${esc(q.example)}</div></details><span class="count" data-count="${q.k}"></span></div>
         </div>`).join('')}
       <div class="form-actions">
@@ -1085,26 +1132,28 @@ async function renderReport(teamId, sid) {
     </form>`, 'report');
 
   const form = $('#report-form');
-  const count = () => REPORT_QS.forEach(q => { $(`[data-count="${q.k}"]`).textContent = `${$(`#r-${q.k}`).value.trim().length}자`; });
+  const count = () => REPORT_FIELDS.forEach(q => { $(`[data-count="${q.k}"]`).textContent = `${$(`#r-${q.k}`).value.trim().length}자`; });
   count();
-  const read = () => Object.fromEntries(REPORT_QS.map(q => [q.k, $(`#r-${q.k}`).value.slice(0, REPORT_MAX)]));
+  const read = () => Object.fromEntries(REPORT_FIELDS.map(q => [q.k, $(`#r-${q.k}`).value.slice(0, REPORT_MAX)]));
   if (restored) state.dirty = true;
   form.addEventListener('input', () => {
     state.dirty = true;
     count();
+    if (me.preview) return;
     try { localStorage.setItem(draftKey, JSON.stringify({ base, ...read() })); } catch { /* 무시 */ }
   });
   const save = async submit => {
     $('#r-err').textContent = '';
     const fields = read();
     if (submit) {
-      const i = REPORT_QS.findIndex(q => !fields[q.k].trim());
-      if (i >= 0) {
-        $('#r-err').textContent = `${i + 1}번 질문에 답해야 제출할 수 있습니다. (지금까지 쓴 내용은 [임시저장]으로 보관하세요.)`;
-        $(`#r-${REPORT_QS[i].k}`).focus();
+      const miss = REPORT_FIELDS.find(q => !fields[q.k].trim());
+      if (miss) {
+        $('#r-err').textContent = `‘${miss.common ? miss.title : `${miss.label.split('.')[0]}번 질문`}’을(를) 써야 제출할 수 있습니다. (지금까지 쓴 내용은 [임시저장]으로 보관하세요.)`;
+        $(`#r-${miss.k}`).focus();
         return;
       }
     }
+    if (me.preview) { $('#r-err').textContent = PREVIEW_BLOCK; return; }
     $$('#report-form button').forEach(b => { b.disabled = true; });
     try {
       const now = new Date().toISOString();
@@ -1143,7 +1192,27 @@ async function renderReports(showAll) {
   }
   const all = teams.flatMap(t => t.members.map(m => ({ t, m, r: t.reports[m.sid] || emptyReport() })));
   const n = st => all.filter(x => x.r.status === st).length;
-  const len = r => REPORT_QS.reduce((s, q) => s + (r[q.k] || '').trim().length, 0);
+  const len = r => REPORT_FIELDS.reduce((s, q) => s + (r[q.k] || '').trim().length, 0);
+
+  // 탐구 이름·최종 목표는 팀원끼리 같아야 한다. 쓴 내용을 모아 보여 주고 서로 다르면 알린다.
+  const commonBox = t => {
+    const rows = REPORT_COMMON.map(q => {
+      const groups = new Map();
+      for (const m of t.members) {
+        const v = (t.reports[m.sid]?.[q.k] || '').trim().replace(/\s+/g, ' ');
+        if (v) groups.set(v, [...(groups.get(v) || []), m.name]);
+      }
+      return { q, groups: [...groups] };
+    }).filter(x => x.groups.length);
+    if (!rows.length) return '';
+    const differ = rows.some(x => x.groups.length > 1);
+    return `<div class="feedback-box ${differ ? 'revise' : ''}" style="margin-bottom:10px">
+      ${differ ? '<b>⚠ 팀원끼리 다르게 쓴 항목이 있습니다</b>' : ''}
+      ${rows.map(({ q, groups }) => `<div class="small" style="margin-top:4px"><b>${esc(q.title)}</b>${groups.length > 1
+        ? `<ul style="margin:2px 0 0;padding-left:18px">${groups.map(([v, names]) => `<li>${esc(v)} <span class="muted">(${esc(names.join(', '))})</span></li>`).join('')}</ul>`
+        : `: ${esc(groups[0][0])}`}</div>`).join('')}
+    </div>`;
+  };
 
   if (showAll) {
     const shown = all.filter(x => x.r.status !== 'empty');
@@ -1169,6 +1238,7 @@ async function renderReports(showAll) {
     </div>
     ${teams.map(t => `
       <div class="section-title"><h2>${esc(t.name)}</h2><span class="muted small">${esc(t.topic)}</span></div>
+      ${commonBox(t)}
       <div class="table-scroll"><table>
         <thead><tr><th>학생</th><th>상태</th><th class="num">분량</th><th>제출</th><th>피드백</th><th></th></tr></thead>
         <tbody>${t.members.map(m => {
@@ -1176,7 +1246,7 @@ async function renderReports(showAll) {
           return `<tr>
             <td><a href="#/team/${t.id}/report/${esc(m.sid)}"><b>${esc(m.name)}</b></a> <span class="small muted">${esc(m.sid)}</span></td>
             <td><span class="badge ${STATUS[r.status].cls}">${STATUS[r.status].label}</span></td>
-            <td class="num">${len(r) ? `${len(r).toLocaleString('ko-KR')}자 · ${REPORT_QS.filter(q => (r[q.k] || '').trim()).length}/${REPORT_QS.length}문항` : ''}</td>
+            <td class="num">${len(r) ? `${len(r).toLocaleString('ko-KR')}자 · ${REPORT_FIELDS.filter(q => (r[q.k] || '').trim()).length}/${REPORT_FIELDS.length}항목` : ''}</td>
             <td class="small">${fmtDateTime(r.submittedAt)}</td>
             <td class="small">${esc((r.feedback || '').slice(0, 40))}${(r.feedback || '').length > 40 ? '…' : ''}</td>
             <td><a class="btn btn-sm" href="#/team/${t.id}/report/${esc(m.sid)}">${r.status === 'submitted' ? '검토하기' : '보기'}</a></td>
@@ -1185,8 +1255,8 @@ async function renderReports(showAll) {
       </table></div>`).join('')}`, 'reports');
 
   $('#r-csv').onclick = () => saveCsv([
-    ['팀명', '주제', '학번', '이름', '상태', ...REPORT_QS.map((q, i) => `${i + 1}. ${q.title}`), '교사 피드백', '제출 일시'],
-    ...all.map(({ t, m, r }) => [t.name, t.topic, m.sid, m.name, STATUS[r.status].label, ...REPORT_QS.map(q => r[q.k]), r.feedback,
+    ['팀명', '주제', '학번', '이름', '상태', ...REPORT_FIELDS.map(q => q.label), '교사 피드백', '제출 일시'],
+    ...all.map(({ t, m, r }) => [t.name, t.topic, m.sid, m.name, STATUS[r.status].label, ...REPORT_FIELDS.map(q => r[q.k]), r.feedback,
       r.submittedAt ? new Date(r.submittedAt).toLocaleString('ko-KR') : '']),
   ], `SLAT_최종보고서_${todayStr()}.csv`);
 }
@@ -1625,7 +1695,7 @@ async function renderPins() {
       <div class="chips">${t.members.map(m => {
         const r = roster[m.sid];
         const bad = !r ? '명단 없음' : r.name !== m.name ? `로그인 이름: ${r.name}` : '';
-        return `<span class="chip ${bad ? 'chip-warn' : ''}"><b>${esc(m.sid)}</b> ${esc(m.name)}${bad ? ` ⚠ ${esc(bad)}` : ''}</span>`;
+        return `<span class="chip ${bad ? 'chip-warn' : ''}"><b>${esc(m.sid)}</b> ${esc(m.name)}${bad ? ` ⚠ ${esc(bad)}` : ''} <a class="no-print" href="#/preview/${t.id}/${esc(m.sid)}">화면 보기</a></span>`;
       }).join('') || '<span class="muted">팀원 없음</span>'}</div>`).join('')}
     <p class="small muted no-print" style="margin-top:20px">※ 접속코드 없이 명단의 학번·이름으로 들어갑니다. 같은 반 학생은 서로 알 수 있으니, 기록은 선생님이 확인해 주세요.</p>`, 'pins');
 }

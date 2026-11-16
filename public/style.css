@@ -53,6 +53,8 @@ main.wrap { padding-block: 24px 64px; }
 .topbar nav a:hover, .topbar nav a.active { background: rgba(255, 255, 255, .15); opacity: 1; }
 .who { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 
+.preview-bar { background: #fdf1d6; color: #5c3d00; border-bottom: 1px solid #e0b04a; padding: 8px 0; font-size: 14px; position: sticky; top: 0; z-index: 5; }
+
 /* ---------- 버튼·폼 ---------- */
 button, .btn {
   font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
@@ -273,6 +275,8 @@ summary { cursor: pointer; color: var(--accent); font-size: 14px; font-weight: 6
 .report-tips .restored { margin: 10px 0 0; color: var(--st-revise-fg); font-weight: 600; font-size: 14px; }
 .report-q { margin-bottom: 26px; }
 .report-q label { font-size: 16px; }
+.report-common { background: var(--surface-2); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
+.report-common + .report-q:not(.report-common) { margin-top: 26px; }
 .report-q .guide { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
 .report-q .frames { margin: 0 0 10px; padding: 10px 12px 10px 28px; background: var(--surface-2); border-radius: 8px; font-size: 13px; }
 .report-q .frames li { margin-bottom: 3px; }

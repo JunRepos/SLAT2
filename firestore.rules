@@ -63,7 +63,7 @@ service cloud.firestore {
 
     // 개인별 최종 보고서 (본인만 작성, 교사 확인)
     function reportKeys() {
-      return ['motive', 'activity', 'sources', 'difficulty', 'teamwork', 'insight', 'poster', 'future',
+      return ['title', 'goal', 'motive', 'activity', 'sources', 'difficulty', 'teamwork', 'insight', 'poster', 'future',
               'status', 'updatedAt', 'submittedAt'];
     }
     function rtext(d, k) {
@@ -71,6 +71,7 @@ service cloud.firestore {
     }
     function reportOk(teamId, sid, d) {
       return isMember(teamId) && link().sid == sid
+        && rtext(d, 'title') && rtext(d, 'goal')
         && rtext(d, 'motive') && rtext(d, 'activity') && rtext(d, 'sources') && rtext(d, 'difficulty') && rtext(d, 'teamwork')
         && rtext(d, 'insight') && rtext(d, 'poster') && rtext(d, 'future');
     }
