@@ -344,7 +344,7 @@ async function startPreview(teamId, sid) {
   if (!m) throw new Error('팀원을 찾을 수 없습니다.');
   state.teacher = state.me;
   state.me = { role: 'student', uid: state.me.uid, sid, name: m.name, teamId, preview: true };
-  location.replace(`#/team/${teamId}`);
+  location.replace(`#/team/${teamId}/report`);
 }
 
 function endPreview() {
@@ -361,7 +361,7 @@ function page(html, active) {
   const me = state.me;
   const links = me.role === 'teacher'
     ? [['dashboard', '#/dashboard', '대시보드'], ['attendance', '#/attendance', '출결'], ['reports', '#/reports', '최종 보고서'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속 안내'], ['settings', '#/settings', '설정']]
-    : [['team', `#/team/${me.teamId}`, '차시 기록'], ['report', `#/team/${me.teamId}/report`, '최종 보고서'], ['budget', `#/team/${me.teamId}/budget`, '예산'], ['info', `#/team/${me.teamId}/info`, '우리 팀 계획서']];
+    : [['report', `#/team/${me.teamId}/report`, '최종 보고서']];
   $app.innerHTML = `
     <header class="topbar"><div class="wrap topbar-in">
       <a class="brand" href="#/">SLAT<span>학교주도활동 기록장</span></a>
@@ -383,7 +383,7 @@ async function route() {
   if (me.role === 'unauthorized') return renderUnauthorized();
 
   const parts = (location.hash.slice(1) || '/').split('/').filter(Boolean);
-  const home = me.role === 'teacher' ? '#/dashboard' : `#/team/${me.teamId}`;
+  const home = me.role === 'teacher' ? '#/dashboard' : `#/team/${me.teamId}/report`;
   try {
     if (me.role === 'teacher') {
       if (parts[0] === 'preview' && parts[1] && parts[2]) return await startPreview(parts[1], parts[2]);
@@ -397,10 +397,14 @@ async function route() {
       if (parts[0] === 'settings') return renderSettings();
       if (parts[0] === 'team' && parts[1] && parts[2] === 'edit') return await renderEdit(parts[1]);
     }
+    // 학생은 최종 보고서만 쓴다. 차시별 기록 화면은 교사만 본다(지난 기록 확인용).
+    if (me.role === 'student') {
+      if (parts[0] === 'team' && parts[1] === me.teamId && parts[2] === 'report' && !parts[3]) return await renderReport(me.teamId, me.sid);
+      return location.replace(home);
+    }
     if (parts[0] === 'team' && parts[1]) {
       if (parts[2] === 's' && parts[3] && !parts[4]) return await renderLog(parts[1], Number(parts[3]));
       if (parts[2] === 'info') return await renderInfo(parts[1]);
-      if (parts[2] === 'report' && me.role === 'student') return await renderReport(parts[1], me.sid);
       if (parts[2] === 'budget') return await renderTeamBudget(parts[1]);
       if (!parts[2]) return await renderTeam(parts[1]);
     }
@@ -485,7 +489,7 @@ function renderLogin() {
     e.preventDefault();
     run(e.target, async () => {
       await studentLogin($('#sid').value.trim(), $('#sname').value.trim());
-      location.hash = `#/team/${state.me.teamId}`;
+      location.hash = `#/team/${state.me.teamId}/report`;
       route();
     });
   };
@@ -1165,9 +1169,9 @@ async function renderReport(teamId, sid) {
       }, { merge: true });
       state.dirty = false;
       try { localStorage.removeItem(draftKey); } catch { /* 무시 */ }
-      toast(submit ? '제출했습니다.' : '임시저장했습니다.');
-      if (submit) location.hash = `#/team/${team.id}`;
-      else route();
+      toast(submit ? '제출했습니다. 선생님이 확인하면 여기에 표시됩니다.' : '임시저장했습니다.');
+      route();
+      if (submit) window.scrollTo(0, 0);
     } catch (e) {
       $('#r-err').textContent = e.code === 'permission-denied' ? `저장하지 못했습니다. ${RULES_NOTICE} 내용을 복사해 두고 선생님께 알려 주세요.` : friendlyError(e);
       $$('#report-form button').forEach(b => { b.disabled = false; });
