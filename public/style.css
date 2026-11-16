@@ -270,6 +270,7 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-
 .report-tips li { margin-bottom: 4px; }
 .report-tips details { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
 summary { cursor: pointer; color: var(--accent); font-size: 14px; font-weight: 600; }
+.report-tips .restored { margin: 10px 0 0; color: var(--st-revise-fg); font-weight: 600; font-size: 14px; }
 .report-q { margin-bottom: 26px; }
 .report-q label { font-size: 16px; }
 .report-q .guide { margin: 0 0 8px; font-size: 14px; color: var(--muted); }

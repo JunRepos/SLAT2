@@ -64,12 +64,12 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
 </style></head><body>
   <div class="page">
     ${head('SLAT 최종 보고서', '학교주도활동 주제 탐구 프로젝트 · 개인별 작성')}
-    <div class="tips"><b>좋은 보고서는 이렇게 씁니다</b>
+    <div class="tips"><b>쓰기 전에 읽어 보세요</b>
       <ul>
-        <li><b>구체적으로</b> — ‘열심히 했다’ 대신 무엇을, 어떻게, 몇 번 했는지</li>
-        <li><b>‘나’를 주어로</b> — 팀이 아니라 내가 맡은 역할과 내가 한 생각</li>
-        <li><b>과정을 보여 주기</b> — 왜 그렇게 했는지, 막혔을 때 어떻게 했는지</li>
-        <li>질문마다 <b>3~5문장</b>. 작성 예시는 쓰는 방식만 참고하고 베끼지 않기</li>
+        <li>무엇을, 어떻게, 몇 번 했는지 <b>구체적으로</b> 씁니다.</li>
+        <li>팀이 한 일이 아니라 <b>내가 한 일</b>을 씁니다.</li>
+        <li>질문마다 <b>3~5문장</b> 정도 씁니다.</li>
+        <li>작성 예시는 다른 주제로 쓴 것입니다. 베끼지 말고 참고만 하세요.</li>
       </ul>
     </div>
     ${QS.slice(0, half).map((q, i) => question(q, i)).join('')}
@@ -81,8 +81,8 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
     <footer><span>※ 다 쓴 뒤 선생님께 제출합니다.</span><span>2 / 2</span></footer>
   </div>
   <div class="page">
-    <header><div><h1>작성 예시</h1><p>가상의 팀이 쓴 예시입니다 · 주제: 환기 방법에 따른 교실 이산화탄소 농도 변화</p></div></header>
-    <div class="note">이 예시는 <b>여러분과 다른 주제</b>로 쓴 것입니다. 내용을 베끼지 말고, <b>얼마나 구체적으로 쓰는지 · ‘나’가 한 일이 드러나는지 · 문제→원인→해결→결과 순서로 쓰는지</b>를 보세요.</div>
+    <header><div><h1>작성 예시</h1><p>주제: 환기 방법에 따른 교실 이산화탄소 농도 변화 (지어낸 예시입니다)</p></div></header>
+    <div class="note">다른 주제로 쓴 예시입니다. 내용을 베끼지 말고, <b>어느 정도로 구체적으로 쓰는지</b>와 <b>‘내가’ 한 일을 어떻게 쓰는지</b>를 참고하세요.</div>
     ${QS.map((q, i) => `<section class="ex"><h2>${i + 1}. ${esc(q.title)}</h2><p>${esc(q.example)}</p></section>`).join('')}
   </div>
 </body></html>`;
