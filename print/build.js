@@ -57,9 +57,9 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   .lines { flex: 1; border: 1pt solid #111; border-radius: 1.5mm;
     background-image: repeating-linear-gradient(to bottom, transparent 0, transparent calc(9mm - .5pt), #bbb calc(9mm - .5pt), #bbb 9mm); background-position: 0 -1pt; }
   footer { margin-top: 2.5mm; font-size: 9pt; color: #555; display: flex; justify-content: space-between; }
-  .ex { margin-top: 5mm; break-inside: avoid; }
-  .ex h2 { font-size: 13pt; font-weight: 800; margin: 0 0 1mm; }
-  .ex p { margin: 0; padding: 3mm 4mm; border-left: 3pt solid #111; background: #f1f1f1; font-size: 12pt; line-height: 1.65; }
+  .ex { margin-top: 4mm; break-inside: avoid; }
+  .ex h2 { font-size: 12pt; font-weight: 800; margin: 0 0 1mm; }
+  .ex p { margin: 0; padding: 2.5mm 4mm; border-left: 3pt solid #111; background: #f1f1f1; font-size: 11pt; line-height: 1.6; }
   .note { border: 1pt solid #111; border-radius: 2mm; padding: 2.5mm 4mm; font-size: 10pt; }
 </style></head><body>
   <div class="page">
@@ -78,7 +78,7 @@ const html = `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>
   <div class="page">
     ${head('SLAT 최종 보고서', '뒷면 · 앞면과 같은 학번·이름을 적어 주세요')}
     ${QS.slice(half).map((q, i) => question(q, i + half)).join('')}
-    <footer><span>※ 같은 내용을 SLAT 기록장 사이트의 [최종 보고서]에도 입력해 제출합니다.</span><span>2 / 2</span></footer>
+    <footer><span>※ 다 쓴 뒤 선생님께 제출합니다.</span><span>2 / 2</span></footer>
   </div>
   <div class="page">
     <header><div><h1>작성 예시</h1><p>가상의 팀이 쓴 예시입니다 · 주제: 환기 방법에 따른 교실 이산화탄소 농도 변화</p></div></header>
