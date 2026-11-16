@@ -9,6 +9,7 @@ rules_version = '2';
 //  teams/{teamId}              계획서 (교사만 쓰기, 팀원 읽기)
 //  teams/{teamId}/logs/{no}    차시 기록 (팀원 작성, 교사 검토·직접 작성)
 //  teams/{teamId}/attendance/{no}  교사 출결 체크 (팀원 읽기)
+//  teams/{teamId}/reports/{sid}  개인별 최종 보고서 (본인 작성, 교사 확인)
 //  (구매 내역은 teams/{teamId} 문서의 purchases 필드 — 교사만 쓰기)
 //  roster/{sid}                학번 → {name, teamId} (교사만 쓰기, 본인 읽기)
 //  links/{uid}                 로그인한 학생 기기 → {sid, name, at}
@@ -60,6 +61,20 @@ service cloud.firestore {
         && d.history is list && d.history.size() <= 30;
     }
 
+    // 개인별 최종 보고서 (본인만 작성, 교사 확인)
+    function reportKeys() {
+      return ['motive', 'activity', 'difficulty', 'teamwork', 'insight', 'poster', 'future',
+              'status', 'updatedAt', 'submittedAt'];
+    }
+    function rtext(d, k) {
+      return d.get(k, '') is string && d.get(k, '').size() <= 3000;
+    }
+    function reportOk(teamId, sid, d) {
+      return isMember(teamId) && link().sid == sid
+        && rtext(d, 'motive') && rtext(d, 'activity') && rtext(d, 'difficulty') && rtext(d, 'teamwork')
+        && rtext(d, 'insight') && rtext(d, 'poster') && rtext(d, 'future');
+    }
+
     match /links/{uid} {
       allow read, delete: if request.auth != null && (request.auth.uid == uid || isTeacher());
       allow create, update: if request.auth != null && request.auth.uid == uid
@@ -81,6 +96,24 @@ service cloud.firestore {
       match /attendance/{no} {
         allow read: if isTeacher() || isMember(teamId);
         allow write: if isTeacher();
+      }
+
+      // 개인별 최종 보고서: 본인과 교사만 읽는다. 교사가 확인 완료(approved)하면 학생 수정이 잠긴다.
+      match /reports/{sid} {
+        allow read: if isTeacher() || (isMember(teamId) && link().sid == sid);
+        allow delete: if isTeacher();
+        allow create: if isTeacher() || (
+          reportOk(teamId, sid, request.resource.data)
+          && request.resource.data.keys().hasOnly(reportKeys())
+          && request.resource.data.status in ['draft', 'submitted']
+        );
+        allow update: if isTeacher() || (
+          reportOk(teamId, sid, request.resource.data)
+          && resource.data.status != 'approved'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(reportKeys())
+          && (request.resource.data.status in ['draft', 'submitted']
+              || request.resource.data.status == resource.data.status)
+        );
       }
 
       match /logs/{no} {

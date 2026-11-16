@@ -336,8 +336,8 @@ async function logout() {
 function page(html, active) {
   const me = state.me;
   const links = me.role === 'teacher'
-    ? [['dashboard', '#/dashboard', '대시보드'], ['attendance', '#/attendance', '출결'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속 안내'], ['settings', '#/settings', '설정']]
-    : [['team', `#/team/${me.teamId}`, '차시 기록'], ['budget', `#/team/${me.teamId}/budget`, '예산'], ['info', `#/team/${me.teamId}/info`, '우리 팀 계획서']];
+    ? [['dashboard', '#/dashboard', '대시보드'], ['attendance', '#/attendance', '출결'], ['reports', '#/reports', '최종 보고서'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속 안내'], ['settings', '#/settings', '설정']]
+    : [['team', `#/team/${me.teamId}`, '차시 기록'], ['report', `#/team/${me.teamId}/report`, '최종 보고서'], ['budget', `#/team/${me.teamId}/budget`, '예산'], ['info', `#/team/${me.teamId}/info`, '우리 팀 계획서']];
   $app.innerHTML = `
     <header class="topbar"><div class="wrap topbar-in">
       <a class="brand" href="#/">SLAT<span>학교주도활동 기록장</span></a>
@@ -365,6 +365,8 @@ async function route() {
       if (parts[0] === 'pins') return await renderPins();
       if (parts[0] === 'attendance') return await renderAttendance(Number(parts[1]) || 0);
       if (parts[0] === 'budget') return await renderBudgetOverview();
+      if (parts[0] === 'reports') return await renderReports(parts[1] === 'all');
+      if (parts[0] === 'team' && parts[1] && parts[2] === 'report' && parts[3]) return await renderReport(parts[1], parts[3]);
       if (parts[0] === 'team' && parts[2] === 's' && parts[3] && parts[4] === 'edit') return await renderLog(parts[1], Number(parts[3]), true);
       if (parts[0] === 'settings') return renderSettings();
       if (parts[0] === 'team' && parts[1] && parts[2] === 'edit') return await renderEdit(parts[1]);
@@ -372,6 +374,7 @@ async function route() {
     if (parts[0] === 'team' && parts[1]) {
       if (parts[2] === 's' && parts[3] && !parts[4]) return await renderLog(parts[1], Number(parts[3]));
       if (parts[2] === 'info') return await renderInfo(parts[1]);
+      if (parts[2] === 'report' && me.role === 'student') return await renderReport(parts[1], me.sid);
       if (parts[2] === 'budget') return await renderTeamBudget(parts[1]);
       if (!parts[2]) return await renderTeam(parts[1]);
     }
@@ -591,11 +594,20 @@ async function addTeam(count) {
   location.hash = `#/team/${id}/edit`;
 }
 
-function downloadCsv(teams) {
+function saveCsv(rows, filename) {
   const cell = v => {
     const s = String(v ?? '');
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const blob = new Blob(['\ufeff' + rows.map(r => r.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function downloadCsv(teams) {
   const header = ['팀명', '주제', '차시', '날짜', '계획', '상태', '교사 출결', '참여자', '활동 내용', '개인별 역할·기여', '결과·산출물', '어려운 점·해결', '다음 차시 계획', '참고자료·출처', '교사 피드백', '제출 일시', '최종 수정'];
   const rows = [header];
   for (const t of teams) {
@@ -613,12 +625,7 @@ function downloadCsv(teams) {
       ]);
     }
   }
-  const blob = new Blob(['﻿' + rows.map(r => r.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `SLAT_활동기록_${todayStr()}.csv`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  saveCsv(rows, `SLAT_활동기록_${todayStr()}.csv`);
 }
 
 // ---------- 팀 홈 (차시 목록) ----------
@@ -626,6 +633,7 @@ function downloadCsv(teams) {
 async function renderTeam(teamId) {
   const { team, logs, attendance } = await fetchTeam(teamId);
   const me = state.me;
+  const myReport = me.role === 'student' ? await fetchReport(teamId, me.sid).catch(() => null) : null;
   const today = todayStr();
   const nowNo = (team.sessions.find(s => s.date >= today) || {}).no;
   const count = st => team.sessions.filter(s => logs[s.no].status === st).length;
@@ -691,6 +699,12 @@ async function renderTeam(teamId) {
       </div>
     </div>
     ${team.caution ? `<div class="feedback-box" style="margin-top:16px">⚠ <b>활동 시 주의사항</b> — ${esc(team.caution)}</div>` : ''}
+    ${myReport ? `<a class="session report-banner" href="#/team/${team.id}/report">
+        <div class="no"><b>📝</b><span>개인</span></div>
+        <div><div class="plan">최종 보고서 (개인별 작성)</div>
+          <div class="meta">${myReport.status === 'revise' ? '선생님이 보완을 요청했습니다. 고친 뒤 다시 제출하세요.' : '활동을 돌아보며 7개 질문에 답합니다. 작성 예시를 참고하세요.'}</div></div>
+        <div class="right"><span class="badge ${STATUS[myReport.status].cls}">${STATUS[myReport.status].label}</span><span class="btn btn-sm">${myReport.status === 'approved' ? '보기' : myReport.status === 'empty' ? '작성하기' : '이어서 작성'}</span></div>
+      </a>` : ''}
     <div class="section-title"><h2>차시별 활동 기록</h2><span class="muted small">매 차시가 끝나면 그날 한 활동을 기록하고 [제출]하세요.</span></div>
     <div class="session-list">${cards}</div>`, 'team');
 }
@@ -855,6 +869,295 @@ async function renderLog(teamId, no, editMode = false) {
       $$('[data-status]').forEach(b => { b.disabled = false; });
     }
   });
+}
+
+// ---------- 최종 보고서 (개인별) ----------
+
+// 질문 문항. k는 Firestore 필드 이름(firestore.rules의 reportKeys와 맞춰야 한다).
+// example은 가상의 팀(주제: 환기 방법에 따른 교실 이산화탄소 농도 변화)이 쓴 작성 예시.
+const REPORT_QS = [
+  {
+    k: 'motive',
+    title: 'SLAT 활동에 참여하게 된 계기',
+    guide: '‘친구가 하자고 해서’처럼 쓰면 안 됩니다. 교과·독서·진로·실생활 중 무엇에서 출발했는지, 그래서 왜 이 주제를 정했는지 쓰세요.',
+    frames: [
+      '교과 연계: 통합과학 시간에 ~를 배웠는데 ~에서 흥미를 느껴 탐구해 보고자 ~를 주제로 설정하였다.',
+      '독서 연계: 『~』에서 ~에 대해 읽고 흥미를 느껴 탐구해 보고자 ~를 주제로 설정하였다.',
+      '진로 연계: 관심 분야인 ~에서 ~ 기사를 보고 흥미를 느껴 탐구해 보고자 ~를 주제로 설정하였다.',
+      '실생활 연계: 평소 ~를 하다가 ~가 궁금해져 탐구해 보고 싶어 ~를 주제로 설정하였다.',
+    ],
+    example: '통합과학 시간에 세포 호흡으로 이산화탄소가 만들어진다는 것을 배웠는데, 5교시만 되면 교실이 답답하고 졸린 까닭이 이산화탄소 때문일 수 있다는 설명에 흥미를 느꼈다. 우리 교실의 농도가 실제로 얼마나 되는지, 어떻게 환기해야 가장 빨리 낮아지는지 직접 재어 보고 싶어 ‘환기 방법에 따른 교실 이산화탄소 농도 변화’를 주제로 설정하였다.',
+  },
+  {
+    k: 'activity',
+    title: '어떠한 활동을 하였는가? 어떤 역할을 맡아 무엇을 탐구하였는가?',
+    guide: '팀이 한 일이 아니라 ‘내가’ 맡은 역할과 한 일을 구체적으로 쓰세요. 무엇을, 어떤 방법·도구로, 몇 번, 어떻게 했는지가 드러나야 합니다.',
+    example: '나는 측정 장치 제작과 데이터 기록을 맡았다. 아두이노에 이산화탄소 센서를 연결해 1분마다 농도를 저장하는 장치를 만들고, 창문만 연 경우 · 앞뒤 문만 연 경우 · 창문과 문을 함께 연 경우로 나누어 쉬는 시간 10분 동안의 변화를 조건마다 3일씩 측정했다. 측정값은 엑셀 그래프로 정리해, 조건별로 농도가 기준값 아래로 내려가는 데 걸리는 시간을 비교했다.',
+  },
+  {
+    k: 'difficulty',
+    title: '진행하는 중 어려움은 없었는가? 있었다면 해결하기 위해 무엇을 해 보았는가?',
+    guide: '‘어려웠지만 열심히 했다’는 안 됩니다. 어떤 문제였는지 → 원인을 어떻게 찾았는지 → 무엇을 바꿔 보았는지 → 그 결과 어떻게 되었는지 순서로 쓰세요.',
+    example: '처음에는 같은 조건인데도 날마다 값이 크게 달라 비교가 되지 않았다. 원인을 찾아보니 교실에 남아 있는 사람 수와 센서를 둔 위치가 매번 달랐다. 그래서 센서를 교실 가운데 책상 높이에 고정하고, 측정할 때마다 남은 인원을 함께 기록했으며, 센서 설명서를 읽고 예열이 끝난 뒤의 값만 쓰도록 방법을 바꾸었다. 그 뒤로는 반복 측정값의 차이가 줄어 조건끼리 비교할 수 있게 되었다.',
+  },
+  {
+    k: 'teamwork',
+    title: '팀원들과 화합을 이루어 프로젝트를 진행하기 위해 노력한 것이 있는가?',
+    guide: '‘사이좋게 지냈다’가 아니라 내가 실제로 한 행동을 쓰세요. 역할을 어떻게 나눴는지, 의견이 다를 때 어떻게 정했는지, 팀원을 어떻게 도왔는지.',
+    example: '측정이 쉬는 시간마다 있어 한 사람에게 일이 몰리지 않도록 요일별 측정 당번표를 만들자고 제안했다. 측정 조건을 두고 의견이 갈렸을 때는 각자 근거를 공유 문서에 적은 뒤 하루씩 시험 측정을 해 보고 그 결과를 보고 정했다. 코딩이 익숙하지 않은 팀원을 위해 내가 쓴 코드에 줄마다 설명을 달아, 누구나 장치를 다룰 수 있게 했다.',
+  },
+  {
+    k: 'insight',
+    title: '최종적으로 활동 결과물을 통해 무엇을 느꼈는가?',
+    guide: '‘재미있었다, 뿌듯했다’로 끝내지 마세요. 탐구로 알게 된 사실(결과)과, 그것을 통해 생각이 어떻게 달라졌는지를 함께 쓰세요.',
+    example: '창문과 문을 함께 열어 맞바람을 만들면 창문만 열 때보다 농도가 훨씬 빨리 내려간다는 것을 그래프로 확인했다. 막연히 ‘환기하면 좋다’고만 알던 것을 직접 잰 데이터로 설명할 수 있게 되니, 과학 지식이 생활 속 문제를 푸는 도구라는 것을 느꼈다. 또 조건을 똑같이 맞추지 않으면 결과를 믿을 수 없다는 것, 곧 변인 통제가 왜 중요한지 실감했다.',
+  },
+  {
+    k: 'poster',
+    title: '활동 결과물을 발표하거나 전시할 계획이 있는가?',
+    guide: 'B4 1장짜리 포스터를 만든다고 생각하고 쓰세요. 포스터에 무엇을 어떤 순서로 담을지, 나는 어느 부분을 맡을지, 언제까지 만들지.',
+    example: 'B4 한 장 포스터로 만들어 복도 게시판에 전시할 계획이다. 왼쪽에는 탐구 동기와 측정 방법(장치 사진), 가운데에는 조건별 농도 변화 그래프, 오른쪽에는 결론과 ‘쉬는 시간 맞바람 환기’ 제안을 넣는다. 나는 그래프 정리를, 다른 팀원은 전체 디자인과 문구를 맡아 마지막 차시까지 완성하기로 했다.',
+  },
+  {
+    k: 'future',
+    title: '이번 활동을 통해 앞으로(2·3학년 중) 추가로 탐구해 보고 싶은 것이 있는가?',
+    guide: '이번 탐구에서 풀지 못했거나 새로 생긴 궁금증에서 출발하세요. 무엇을, 왜, 어떤 방법이나 과목과 연결해 탐구하고 싶은지.',
+    example: '이번에는 이산화탄소만 쟀는데, 환기를 하면 이산화탄소는 줄지만 바깥 미세먼지가 들어올 수 있다는 점이 궁금해졌다. 2학년 때는 미세먼지 센서를 추가해 ‘언제, 얼마나 환기하는 것이 가장 좋은가’를 탐구하고 싶다. 또 농도가 기준을 넘으면 자동으로 알려 주는 장치로 발전시켜, 정보 과목에서 배우는 프로그래밍과 연결해 보고 싶다.',
+  },
+];
+const REPORT_MAX = 3000;
+
+const emptyReport = () => ({
+  status: 'empty', feedback: '',
+  ...Object.fromEntries(REPORT_QS.map(q => [q.k, ''])),
+});
+
+async function fetchReport(teamId, sid) {
+  const snap = await getDoc(doc(db, 'teams', teamId, 'reports', sid));
+  return { ...emptyReport(), ...(snap.exists() ? snap.data() : {}) };
+}
+
+// 팀의 모든 보고서. 새 보안 규칙이 아직 배포되지 않았으면 null.
+async function fetchReports(teamId) {
+  try {
+    const out = {};
+    (await getDocs(collection(db, 'teams', teamId, 'reports'))).forEach(d => { out[d.id] = { ...emptyReport(), ...d.data() }; });
+    return out;
+  } catch (e) {
+    if (e.code === 'permission-denied') return null;
+    throw e;
+  }
+}
+
+const RULES_NOTICE = '최종 보고서 기능은 새 보안 규칙이 배포되어야 쓸 수 있습니다.';
+
+function reportSheet(team, m, r) {
+  return `
+    <div class="card report-sheet">
+      <div class="report-head">
+        <div><div class="muted small">${esc(team.name)} · ${esc(team.topic)}</div>
+          <h2>${esc(m.name)} <span class="muted small">${esc(m.sid)}${m.role ? ` · ${esc(m.role)}` : ''}</span></h2></div>
+        <div class="small muted">${r.submittedAt ? `제출 ${fmtDateTime(r.submittedAt)}` : ''} <span class="badge ${STATUS[r.status].cls}">${STATUS[r.status].label}</span></div>
+      </div>
+      ${REPORT_QS.map((q, i) => block(`${i + 1}. ${q.title}`, r[q.k])).join('')}
+    </div>`;
+}
+
+async function renderReport(teamId, sid) {
+  const { team, logs } = await fetchTeam(teamId);
+  const me = state.me;
+  const isTeacher = me.role === 'teacher';
+  const m = team.members.find(x => x.sid === sid);
+  if (!m) throw new Error('팀원을 찾을 수 없습니다.');
+  let r;
+  try {
+    r = await fetchReport(teamId, sid);
+  } catch (e) {
+    if (e.code !== 'permission-denied') throw e;
+    return page(`<div class="card"><h2>아직 준비 중입니다</h2><p>${RULES_NOTICE}${isTeacher ? ' README의 [보안 규칙 배포]를 참고해 <code>firestore.rules</code>를 배포해 주세요.' : ' 선생님께 알려 주세요.'}</p></div>`, isTeacher ? 'reports' : 'report');
+  }
+  const ref = doc(db, 'teams', teamId, 'reports', sid);
+  const requested = r.status === 'revise';
+  const feedback = r.feedback
+    ? `<div class="feedback-box ${requested ? 'revise' : ''}"><b>💬 ${requested ? '선생님 보완 요청 — 고친 뒤 다시 제출해 주세요' : '선생님 피드백'}</b>
+         <div style="white-space:pre-wrap;margin-top:4px">${esc(r.feedback)}</div><span class="who">${fmtDateTime(r.feedbackAt)}</span></div>`
+    : '';
+
+  if (isTeacher) {
+    page(`
+      <div class="crumb no-print"><a href="#/reports">최종 보고서</a> › ${esc(team.name)} › ${esc(m.name)}</div>
+      <div class="page-head no-print"><h1>최종 보고서</h1>
+        <div class="actions"><button class="btn" onclick="window.print()">🖨 인쇄</button></div></div>
+      ${reportSheet(team, m, r)}
+      <div class="card review-panel no-print">
+        <h2>교사 확인</h2>
+        <div class="field" style="margin-top:12px"><label for="fb">피드백·보완 요청 메시지 <span class="hint">학생 화면에 그대로 보입니다</span></label>
+          <textarea id="fb" rows="3" placeholder="예: 3번에서 어떤 방법으로 해결했는지 더 구체적으로 써 주세요.">${esc(r.feedback)}</textarea></div>
+        <div class="btns">
+          ${[['draft', '미제출'], ['submitted', '제출됨'], ['revise', '↩ 보완 요청'], ['approved', '✅ 확인 완료']].map(([st, label]) =>
+            `<button type="button" class="${st === 'approved' ? 'btn-primary' : ''} ${(r.status === 'empty' ? 'draft' : r.status) === st ? 'current' : ''}" data-rstatus="${st}">${label}</button>`).join('')}
+        </div>
+        <p class="small muted">확인 완료하면 학생이 더 고칠 수 없습니다. 보완 요청·미제출 상태에서는 학생이 고쳐 다시 제출할 수 있습니다.</p>
+        <p class="err" id="rv-err"></p>
+      </div>`, 'reports');
+    $$('[data-rstatus]').forEach(btn => btn.onclick = async () => {
+      const status = btn.dataset.rstatus;
+      const text = $('#fb').value.slice(0, 2000);
+      if (status === 'revise' && !text.trim()) {
+        $('#rv-err').textContent = '보완 요청할 때는 무엇을 고칠지 메시지를 적어 주세요.';
+        $('#fb').focus();
+        return;
+      }
+      $$('[data-rstatus]').forEach(b => { b.disabled = true; });
+      try {
+        await setDoc(ref, { status, feedback: text, feedbackAt: new Date().toISOString() }, { merge: true });
+        toast('저장했습니다.');
+        route();
+      } catch (e) {
+        $('#rv-err').textContent = friendlyError(e);
+        $$('[data-rstatus]').forEach(b => { b.disabled = false; });
+      }
+    });
+    return;
+  }
+
+  if (r.status === 'approved') {
+    return page(`
+      <div class="page-head"><div><h1>최종 보고서</h1><p class="muted small">✅ 선생님 확인이 끝났습니다. 수정이 필요하면 선생님께 말씀드리세요.</p></div></div>
+      ${feedback}${reportSheet(team, m, r)}`, 'report');
+  }
+
+  const written = team.sessions.filter(s => (logs[s.no].content || '').trim());
+  page(`
+    <div class="page-head"><div><h1>최종 보고서 <span class="badge ${STATUS[r.status].cls}">${STATUS[r.status].label}</span></h1>
+      <p class="muted small">${esc(m.name)} · ${esc(team.name)} · 팀이 아니라 <b>각자</b> 작성합니다. 다른 팀원에게는 보이지 않습니다.</p></div></div>
+    ${feedback}
+    <div class="card report-tips">
+      <b>좋은 보고서는 이렇게 씁니다</b>
+      <ul>
+        <li><b>구체적으로</b> — ‘열심히 했다’ 대신 무엇을, 어떻게, 몇 번 했는지 씁니다.</li>
+        <li><b>‘나’를 주어로</b> — 팀이 한 일이 아니라 내가 맡은 역할과 내가 한 생각을 씁니다.</li>
+        <li><b>과정을 보여 주기</b> — 결과만이 아니라 왜 그렇게 했는지, 막혔을 때 어떻게 했는지를 씁니다.</li>
+        <li>질문마다 <b>3~5문장</b>이 적당합니다. 각 질문 아래 [작성 예시]는 다른 주제로 쓴 것이니 내용을 베끼지 말고 쓰는 방식만 참고하세요.</li>
+      </ul>
+      ${written.length ? `<details><summary>우리 팀 차시 기록 다시 보기 (${written.length}개)</summary>
+        ${written.map(s => `<div class="readonly-block" style="margin:10px 0 0"><h3>${s.no}차시 · ${fmtDate(s.date)} · ${esc(s.plan)}</h3><div>${esc(logs[s.no].content)}</div></div>`).join('')}</details>` : ''}
+    </div>
+    <form class="card" id="report-form">
+      ${REPORT_QS.map((q, i) => `
+        <div class="field report-q">
+          <label for="r-${q.k}">${i + 1}. ${esc(q.title)}</label>
+          <p class="guide">${esc(q.guide)}</p>
+          ${q.frames ? `<ul class="frames">${q.frames.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}
+          <textarea id="r-${q.k}" rows="6" maxlength="${REPORT_MAX}">${esc(r[q.k])}</textarea>
+          <div class="report-under"><details><summary>작성 예시 보기</summary><div class="example">${esc(q.example)}</div></details><span class="count" data-count="${q.k}"></span></div>
+        </div>`).join('')}
+      <div class="form-actions">
+        <span class="grow">${r.status === 'submitted' ? '이미 제출했습니다. 고친 뒤 다시 제출할 수 있습니다.' : '임시저장해 두고 나중에 이어 쓸 수 있습니다. 제출해야 선생님께 전달됩니다.'}</span>
+        <button type="button" id="r-save">임시저장</button>
+        <button type="submit" class="btn-primary">${DONE.includes(r.status) ? '다시 제출' : '제출하기'}</button>
+      </div>
+      <p class="err" id="r-err"></p>
+    </form>`, 'report');
+
+  const form = $('#report-form');
+  const count = () => REPORT_QS.forEach(q => { $(`[data-count="${q.k}"]`).textContent = `${$(`#r-${q.k}`).value.trim().length}자`; });
+  count();
+  form.addEventListener('input', () => { state.dirty = true; count(); });
+  const save = async submit => {
+    $('#r-err').textContent = '';
+    const fields = Object.fromEntries(REPORT_QS.map(q => [q.k, $(`#r-${q.k}`).value.slice(0, REPORT_MAX)]));
+    if (submit) {
+      const i = REPORT_QS.findIndex(q => !fields[q.k].trim());
+      if (i >= 0) {
+        $('#r-err').textContent = `${i + 1}번 질문에 답해야 제출할 수 있습니다. (지금까지 쓴 내용은 [임시저장]으로 보관하세요.)`;
+        $(`#r-${REPORT_QS[i].k}`).focus();
+        return;
+      }
+    }
+    $$('#report-form button').forEach(b => { b.disabled = true; });
+    try {
+      const now = new Date().toISOString();
+      await setDoc(ref, {
+        ...fields,
+        status: submit ? 'submitted' : ['empty', 'draft'].includes(r.status) ? 'draft' : r.status,
+        updatedAt: now,
+        ...(submit ? { submittedAt: now } : {}),
+      }, { merge: true });
+      state.dirty = false;
+      toast(submit ? '제출했습니다.' : '임시저장했습니다.');
+      if (submit) location.hash = `#/team/${team.id}`;
+      else route();
+    } catch (e) {
+      $('#r-err').textContent = e.code === 'permission-denied' ? `저장하지 못했습니다. ${RULES_NOTICE} 내용을 복사해 두고 선생님께 알려 주세요.` : friendlyError(e);
+      $$('#report-form button').forEach(b => { b.disabled = false; });
+    }
+  };
+  $('#r-save').onclick = () => save(false);
+  form.onsubmit = e => { e.preventDefault(); save(true); };
+}
+
+// 교사: 전체 현황 / 모아 보기(인쇄용)
+async function renderReports(showAll) {
+  const teams = (await getDocs(collection(db, 'teams'))).docs
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  let blocked = false;
+  await Promise.all(teams.map(async t => {
+    t.reports = await fetchReports(t.id);
+    if (!t.reports) { blocked = true; t.reports = {}; }
+  }));
+  if (blocked) {
+    return page(`<div class="card"><h2>보안 규칙 배포 필요</h2><p>${RULES_NOTICE} 저장소의 <code>firestore.rules</code>를 배포하거나(<code>npx firebase-tools deploy --only firestore:rules</code>), 파일 내용을 Firebase 콘솔 <b>Firestore → 규칙</b>에 붙여 넣고 [게시]해 주세요.</p></div>`, 'reports');
+  }
+  const all = teams.flatMap(t => t.members.map(m => ({ t, m, r: t.reports[m.sid] || emptyReport() })));
+  const n = st => all.filter(x => x.r.status === st).length;
+  const len = r => REPORT_QS.reduce((s, q) => s + (r[q.k] || '').trim().length, 0);
+
+  if (showAll) {
+    const shown = all.filter(x => x.r.status !== 'empty');
+    page(`
+      <div class="crumb no-print"><a href="#/reports">최종 보고서</a> › 모아 보기</div>
+      <div class="page-head no-print"><div><h1>최종 보고서 모아 보기</h1><p class="muted small">작성된 보고서 ${shown.length}건 · 인쇄하면 학생마다 새 쪽에서 시작합니다.</p></div>
+        <div class="actions"><button class="btn-primary" onclick="window.print()">🖨 인쇄 / PDF 저장</button></div></div>
+      ${shown.map(x => reportSheet(x.t, x.m, x.r)).join('') || '<div class="card muted">아직 작성된 보고서가 없습니다.</div>'}`, 'reports');
+    return;
+  }
+
+  page(`
+    <div class="page-head">
+      <div><h1>최종 보고서</h1><p class="muted small">학생이 개인별로 작성합니다. 이름을 누르면 내용을 보고 확인·보완 요청할 수 있습니다.</p></div>
+      <div class="actions"><a class="btn" href="#/reports/all">모아 보기 · 인쇄</a><button class="btn" id="r-csv">⬇ 보고서 CSV</button></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="num">${n('submitted') + n('approved') + n('revise')}<small> / ${all.length}</small></div><div class="lbl">제출한 학생</div></div>
+      <div class="stat ${n('submitted') ? 'alert' : ''}"><div class="num">${n('submitted')}</div><div class="lbl">확인 대기</div></div>
+      <div class="stat"><div class="num">${n('draft')}</div><div class="lbl">작성 중</div></div>
+      <div class="stat ${n('empty') ? 'alert' : ''}"><div class="num">${n('empty')}</div><div class="lbl">미작성</div></div>
+      <div class="stat"><div class="num">${n('approved')}</div><div class="lbl">확인 완료</div></div>
+    </div>
+    ${teams.map(t => `
+      <div class="section-title"><h2>${esc(t.name)}</h2><span class="muted small">${esc(t.topic)}</span></div>
+      <div class="table-scroll"><table>
+        <thead><tr><th>학생</th><th>상태</th><th class="num">분량</th><th>제출</th><th>피드백</th><th></th></tr></thead>
+        <tbody>${t.members.map(m => {
+          const r = t.reports[m.sid] || emptyReport();
+          return `<tr>
+            <td><a href="#/team/${t.id}/report/${esc(m.sid)}"><b>${esc(m.name)}</b></a> <span class="small muted">${esc(m.sid)}</span></td>
+            <td><span class="badge ${STATUS[r.status].cls}">${STATUS[r.status].label}</span></td>
+            <td class="num">${len(r) ? `${len(r).toLocaleString('ko-KR')}자 · ${REPORT_QS.filter(q => (r[q.k] || '').trim()).length}/${REPORT_QS.length}문항` : ''}</td>
+            <td class="small">${fmtDateTime(r.submittedAt)}</td>
+            <td class="small">${esc((r.feedback || '').slice(0, 40))}${(r.feedback || '').length > 40 ? '…' : ''}</td>
+            <td><a class="btn btn-sm" href="#/team/${t.id}/report/${esc(m.sid)}">${r.status === 'submitted' ? '검토하기' : '보기'}</a></td>
+          </tr>`;
+        }).join('') || '<tr><td class="muted">팀원이 없습니다.</td></tr>'}</tbody>
+      </table></div>`).join('')}`, 'reports');
+
+  $('#r-csv').onclick = () => saveCsv([
+    ['팀명', '주제', '학번', '이름', '상태', ...REPORT_QS.map((q, i) => `${i + 1}. ${q.title}`), '교사 피드백', '제출 일시'],
+    ...all.map(({ t, m, r }) => [t.name, t.topic, m.sid, m.name, STATUS[r.status].label, ...REPORT_QS.map(q => r[q.k]), r.feedback,
+      r.submittedAt ? new Date(r.submittedAt).toLocaleString('ko-KR') : '']),
+  ], `SLAT_최종보고서_${todayStr()}.csv`);
 }
 
 // ---------- 출결 (교사) ----------
