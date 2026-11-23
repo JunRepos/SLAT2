@@ -361,7 +361,7 @@ function page(html, active) {
   const me = state.me;
   const links = me.role === 'teacher'
     ? [['dashboard', '#/dashboard', '대시보드'], ['logs', '#/logs', '차시 기록'], ['attendance', '#/attendance', '출결'], ['reports', '#/reports', '최종 보고서'], ['budget', '#/budget', '예산'], ['pins', '#/pins', '접속 안내'], ['settings', '#/settings', '설정']]
-    : [['report', `#/team/${me.teamId}/report`, '최종 보고서'], ['poster', `#/team/${me.teamId}/poster`, '포스터']];
+    : [['report', `#/team/${me.teamId}/report`, '최종 보고서'], ['poster', `#/team/${me.teamId}/poster`, '포스터'], ['guide', '#/poster-guide', '포스터 가이드']];
   $app.innerHTML = `
     <header class="topbar"><div class="wrap topbar-in">
       <a class="brand" href="#/">SLAT<span>학교주도활동 기록장</span></a>
@@ -387,6 +387,7 @@ async function route() {
   const parts = (location.hash.slice(1) || '/').split('/').filter(Boolean);
   const home = me.role === 'teacher' ? '#/dashboard' : `#/team/${me.teamId}/report`;
   try {
+    if (parts[0] === 'poster-guide') return renderPosterGuide();
     if (me.role === 'teacher') {
       if (parts[0] === 'preview' && parts[1] && parts[2]) return await startPreview(parts[1], parts[2]);
       if (parts[0] === 'dashboard') return await renderDashboard();
@@ -1298,7 +1299,7 @@ async function renderReports(showAll) {
   page(`
     <div class="page-head">
       <div><h1>최종 보고서</h1><p class="muted small">학생이 개인별로 작성합니다. 이름을 누르면 내용을 보고 확인·보완 요청할 수 있습니다.</p></div>
-      <div class="actions"><a class="btn" href="#/reports/all">모아 보기 · 인쇄</a><button class="btn" id="r-csv">⬇ 보고서 CSV</button></div>
+      <div class="actions"><a class="btn" href="#/poster-guide">포스터 가이드 (A4 양식)</a><a class="btn" href="#/reports/all">모아 보기 · 인쇄</a><button class="btn" id="r-csv">⬇ 보고서 CSV</button></div>
     </div>
     <div class="stats">
       <div class="stat"><div class="num">${n('submitted') + n('approved') + n('revise')}<small> / ${all.length}</small></div><div class="lbl">제출한 학생</div></div>
@@ -1350,19 +1351,19 @@ const POSTER_LAYOUTS = [
 ];
 // from: 최종 보고서에서 가져올 수 있는 항목. rec: 권장 글자 수. figs: 넣을 수 있는 그림 자리.
 const POSTER_SECS = [
-  { k: 'motive', title: '탐구 동기 및 목적', from: 'motive', rec: [250, 450],
+  { k: 'motive', starter: '~ 수업(책, 기사)에서 ~을 접하고 ~이 궁금해졌다. 그러나 ~에 대해서는 알려진 바를 찾기 어려웠다. 이에 본 탐구의 목적은 ~을 밝히는 것이다.', title: '탐구 동기 및 목적', from: 'motive', rec: [250, 450],
     guide: '어떤 수업·책·경험에서 궁금증이 생겼는지 쓰고, 마지막 문장에 “본 탐구의 목적은 ~이다”처럼 무엇을 밝히려 했는지 분명히 씁니다.' },
-  { k: 'theory', title: '이론적 배경', rec: [200, 450], figs: [['theory', '원리를 설명하는 그림']],
+  { k: 'theory', starter: '~(이)란 ~을 말한다. ~에 따르면 ~이다. 가설: ~하면 ~할 것이다.', title: '이론적 배경', rec: [200, 450], figs: [['theory', '원리를 설명하는 그림']],
     guide: '탐구에 필요한 개념·원리·공식을 정리합니다. 교과서나 자료에서 찾은 내용은 출처를 밝힙니다. 탐구 문제나 가설이 있으면 여기에 씁니다.' },
-  { k: 'method', title: '탐구 방법', from: 'activity', rec: [350, 650], figs: [['method', '실험 장치·회로·제작 과정 사진']],
+  { k: 'method', starter: '준비물: ~. 조작 변인: ~. 통제 변인: ~. 측정한 것: ~. 절차: 먼저 ~하였다. 다음으로 ~하였다. 각 조건을 ~회 반복하였다.', title: '탐구 방법', from: 'activity', rec: [350, 650], figs: [['method', '실험 장치·회로·제작 과정 사진']],
     guide: '다른 사람이 보고 똑같이 따라 할 수 있을 만큼 씁니다. 준비물, 바꾼 조건(조작 변인)과 같게 유지한 조건(통제 변인), 측정한 것, 순서, 반복 횟수를 넣습니다.' },
-  { k: 'result', title: '탐구 결과', rec: [350, 650], figs: [['result', '결과 그래프나 표'], ['resultb', '두 번째 그래프·결과물 사진']],
+  { k: 'result', starter: '그림 2와 같이 ~ 조건에서 ~은 ~에서 ~(으)로 변하였다. ~ 조건이 ~ 조건보다 ~만큼 컸다.', title: '탐구 결과', rec: [350, 650], figs: [['result', '결과 그래프나 표'], ['resultb', '두 번째 그래프·결과물 사진']],
     guide: '측정값과 관찰한 사실을 수치와 함께 씁니다. 그래프나 표는 꼭 넣고, 글에서 “그림 2와 같이”처럼 그림 번호로 가리킵니다. 생각이나 해석은 다음 칸에 씁니다.' },
-  { k: 'conclusion', title: '결론 및 논의', from: 'insight', rec: [250, 500], key: true,
+  { k: 'conclusion', starter: '~한 결과 가설은 지지되었다(지지되지 않았다). 이는 ~ 때문으로 해석된다. 따라서 ~라고 할 수 있다.', title: '결론 및 논의', from: 'insight', rec: [250, 500], key: true,
     guide: '결과가 뜻하는 바를 씁니다. 왜 그런 결과가 나왔는지 원리로 설명하고, 처음 세운 목적이나 가설에 답합니다.' },
-  { k: 'difficulty', title: '탐구의 어려움과 한계', from: 'difficulty', rec: [200, 400],
+  { k: 'difficulty', starter: '처음에는 ~한 문제가 있었다. 원인은 ~이었고 ~하여 해결하였다. 다만 ~은 확인하지 못한 한계가 있다.', title: '탐구의 어려움과 한계', from: 'difficulty', rec: [200, 400],
     guide: '진행하면서 부딪힌 문제와 해결한 방법을 쓰고, 끝까지 해결하지 못해 결과를 해석할 때 주의할 점(한계)도 씁니다.' },
-  { k: 'insight', title: '느낀 점 및 후속 탐구', from: 'future', rec: [200, 400],
+  { k: 'insight', starter: '이번 탐구를 통해 ~을 알게 되었다. 후속 탐구로 ~을 조사하고자 한다.', title: '느낀 점 및 후속 탐구', from: 'future', rec: [200, 400],
     guide: '이번 탐구로 배운 점과, 이어서 탐구해 보고 싶은 주제를 구체적으로 씁니다.' },
 ];
 const POSTER_FIGS = POSTER_SECS.flatMap(q => (q.figs || []).map(([slot, hint]) => ({ slot, hint, sec: q.k })));
@@ -1494,7 +1495,7 @@ async function renderPoster(teamId) {
       ${isTeacher ? `<div class="crumb"><a href="#/reports">최종 보고서</a> › ${esc(team.name)} › 포스터</div>` : ''}
       <div class="page-head">
         <div><h1>포스터 만들기</h1><p class="muted small">${esc(team.name)} · B4 1장 · 팀원이 함께 만드는 포스터입니다. 누가 저장하든 팀 전체에 반영됩니다.${got.main.updatedAt ? ` · 마지막 저장 ${fmtDateTime(got.main.updatedAt)} (${esc(got.main.updatedBy)})` : ''}</p></div>
-        <div class="actions"><button id="p-save" class="btn-primary">저장</button><button id="p-print" class="btn">🖨 인쇄 / PDF</button></div>
+        <div class="actions"><a class="btn" href="#/poster-guide">📄 가이드 · A4 양식</a><button id="p-save" class="btn-primary">저장</button><button id="p-print" class="btn">🖨 인쇄 / PDF</button></div>
       </div>
       <p class="err" id="p-err"></p>
     </div>
@@ -1525,7 +1526,7 @@ async function renderPoster(teamId) {
           <div class="field poster-sec" data-sec="${q.k}">
             <label for="p-t-${q.k}">${i + 1}. ${esc(q.title)}</label>
             <p class="guide">${esc(q.guide)}</p>
-            <textarea id="p-t-${q.k}" data-k="t_${q.k}" rows="7" maxlength="${POSTER_TEXT_MAX}">${esc(d[`t_${q.k}`])}</textarea>
+            <textarea id="p-t-${q.k}" data-k="t_${q.k}" rows="7" maxlength="${POSTER_TEXT_MAX}" placeholder="${esc(q.starter)}">${esc(d[`t_${q.k}`])}</textarea>
             <div class="report-under">
               ${myReport && q.from && (myReport[q.from] || '').trim() ? `<button type="button" class="btn-sm" data-from="${q.k}">내 최종 보고서에서 가져오기</button>` : '<span></span>'}
               <span class="count" data-pcount="${q.k}"></span>
@@ -1645,6 +1646,117 @@ async function renderPoster(teamId) {
       fail(e);
     }
   });
+}
+
+// ---------- 포스터 가이드 (A4 양식) ----------
+// 포스터의 어느 자리에 어떤 글과 그림이 들어가는지 보여 주는 양식. 인쇄해서 손으로 채운 뒤 [포스터]에 옮겨 쓴다.
+
+function renderPosterGuide() {
+  const me = state.me;
+  const isTeacher = me.role === 'teacher';
+  // 양식에서 각 칸이 차지하는 높이 비율(왼쪽 단 3칸, 오른쪽 단 4칸 + 참고 문헌)
+  const weight = { motive: 3, theory: 3, method: 4.4, result: 4.6, conclusion: 2.6, difficulty: 2.2, insight: 2.2 };
+  const left = ['motive', 'theory', 'method'];
+  const sec = (q, i) => `
+    <section style="flex:${weight[q.k]}">
+      <h2><span>${i + 1}. ${esc(q.title)}</span><em>${q.rec[0]}~${q.rec[1]}자</em></h2>
+      <p class="g-hint">${esc(q.guide)}</p>
+      ${q.figs ? `<div class="g-figs">${q.figs.map(([, hint]) => `<div class="g-fig"><b>그림 넣는 자리</b><span>${esc(hint)}</span></div>`).join('')}</div>` : ''}
+      <div class="g-lines"></div>
+    </section>`;
+  const col = keys => POSTER_SECS.map((q, i) => (keys.includes(q.k) ? sec(q, i) : '')).join('');
+
+  page(`
+    <div class="no-print">
+      <div class="page-head">
+        <div><h1>포스터 가이드</h1><p class="muted small">포스터의 어느 자리에 무엇이 들어가는지 보여 주는 A4 양식입니다. 인쇄해서 팀이 함께 손으로 채운 뒤 [포스터]에 옮겨 쓰세요.</p></div>
+        <div class="actions"><button class="btn-primary" onclick="window.print()">🖨 양식 인쇄 (A4 2쪽)</button>${isTeacher ? '' : `<a class="btn" href="#/team/${me.teamId}/poster">포스터 만들러 가기</a>`}</div>
+      </div>
+      <div class="card guide-steps">
+        <b>만드는 순서</b>
+        <ol>
+          <li>아래 양식을 인쇄해서, 칸마다 무엇을 쓸지 팀원끼리 나누어 맡습니다.</li>
+          <li>칸 위에 적힌 안내와 글자 수를 보고 손으로 초안을 씁니다. 2쪽의 ‘이렇게 시작하세요’를 참고합니다.</li>
+          <li>그림 자리에 넣을 사진·그래프를 정합니다. 그래프는 화면을 캡처하고, 사진은 밝은 곳에서 가까이 찍습니다.</li>
+          <li>사이트의 [포스터]에 옮겨 쓰고 그림을 올립니다. 글자 크기와 배치는 자동으로 맞춰집니다.</li>
+          <li>미리보기에서 빈 곳이나 넘치는 곳이 없는지 확인하고 저장합니다.</li>
+        </ol>
+      </div>
+    </div>
+    <div class="guide-stage">
+      <div class="pguide">
+        <div class="g-head">
+          <div class="g-slot big"><b>제목</b> 무엇을 탐구했는지 드러나게 씁니다 (60자 이내)</div>
+          <div class="g-slot"><b>부제</b> 안 써도 됩니다. 탐구 문제를 한 문장으로</div>
+          <div class="g-pair"><div class="g-slot"><b>팀원</b> 이름은 자동으로 들어갑니다</div><div class="g-slot"><b>소속</b> 예: ○○고등학교 1학년</div></div>
+        </div>
+        <div class="g-abs">
+          <h2><span>초록</span><em>150~300자</em></h2>
+          <p class="g-hint">포스터 전체를 3~4문장으로 줄인 글입니다. 무엇을 알아보려고, 어떻게 탐구했고, 무엇을 알아냈는지 씁니다. 다른 칸을 다 쓴 뒤 마지막에 씁니다.</p>
+          <div class="g-lines"></div>
+        </div>
+        <div class="g-cols">
+          <div class="g-col">${col(left)}</div>
+          <div class="g-col">${col(POSTER_SECS.map(q => q.k).filter(k => !left.includes(k)))}
+            <section style="flex:1.3"><h2><span>참고 문헌</span><em>한 줄에 하나씩</em></h2><p class="g-hint">지은이, 제목, 출판사나 사이트, 연도 순서로 씁니다.</p><div class="g-lines"></div></section>
+          </div>
+        </div>
+        <div class="g-foot"><span>SLAT 포스터 양식 · 실제 포스터는 B4 1장으로 인쇄됩니다</span><span>팀명: ________________</span></div>
+      </div>
+      <div class="pguide g-tips">
+        <h1>칸별 작성 요령</h1>
+        <table>
+          <thead><tr><th>칸</th><th>무엇을 쓰는가</th><th>이렇게 시작하세요</th></tr></thead>
+          <tbody>
+            <tr><td><b>초록</b><br>150~300자</td><td>탐구 전체를 3~4문장으로 줄인 글. 목적, 방법, 결과, 결론이 한 문장씩 들어갑니다.</td><td>본 탐구는 ~을 알아보고자 하였다. ~을 이용하여 ~을 측정하였다. 그 결과 ~하였으며, 이는 ~ 때문으로 해석된다.</td></tr>
+            ${POSTER_SECS.map((q, i) => `<tr><td><b>${i + 1}. ${esc(q.title)}</b><br>${q.rec[0]}~${q.rec[1]}자</td><td>${esc(q.guide)}</td><td>${esc(q.starter)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+        <div class="g-two">
+          <div><h2>글 쓸 때</h2><ul>
+            <li>문장은 “~하였다, ~이다”로 끝냅니다. “~했어요, ~인 것 같다”는 쓰지 않습니다.</li>
+            <li>“많이, 꽤, 열심히” 대신 숫자와 단위를 씁니다. (예: 10분 후 780 ppm)</li>
+            <li>결과 칸에는 사실만, 해석과 생각은 결론 칸에 씁니다.</li>
+            <li>교과서나 자료에서 가져온 내용은 참고 문헌에 적습니다.</li>
+            <li>글자 수가 모자라면 포스터가 비어 보입니다. 권장 글자 수를 채웁니다.</li>
+          </ul></div>
+          <div><h2>그림 넣을 때</h2><ul>
+            <li>그림은 3장 이상 넣습니다. 결과 칸에는 그래프나 표가 꼭 있어야 합니다.</li>
+            <li>그래프에는 가로축·세로축 이름과 단위, 범례가 보여야 합니다.</li>
+            <li>사진은 밝은 곳에서 가까이, 배경이 지저분하지 않게 찍습니다.</li>
+            <li>그림 번호(그림 1, 그림 2…)는 자동으로 붙습니다. 설명만 한 줄 씁니다.</li>
+            <li>글에서 그림을 “그림 2와 같이”처럼 번호로 가리킵니다.</li>
+          </ul></div>
+        </div>
+        <div class="g-check"><h2>내기 전에 확인</h2>
+          <span>☐ 제목만 보고 무엇을 탐구했는지 알 수 있다</span><span>☐ 탐구 목적이 한 문장으로 적혀 있다</span>
+          <span>☐ 바꾼 조건과 같게 한 조건이 적혀 있다</span><span>☐ 결과에 숫자와 그래프가 있다</span>
+          <span>☐ 결론이 목적(가설)에 답하고 있다</span><span>☐ 빈 칸과 넘치는 칸이 없다</span>
+          <span>☐ 맞춤법과 띄어쓰기를 확인했다</span><span>☐ 참고 문헌을 적었다</span>
+        </div>
+      </div>
+    </div>`, 'guide');
+
+  const pageStyle = document.createElement('style');
+  pageStyle.id = 'poster-page-style';
+  pageStyle.textContent = '@page { size: 210mm 297mm; margin: 0; }';
+  document.head.appendChild(pageStyle);
+
+  // 줄 칸: 칸 높이를 약 7.5mm 간격으로 나눠 선을 긋는다.
+  const row = 7.5 * 96 / 25.4;
+  $$('.g-lines').forEach(box => {
+    const h = box.clientHeight;
+    const n = Math.max(1, Math.round(h / row));
+    for (let i = 1; i < n; i++) {
+      const line = document.createElement('i');
+      line.style.top = `${(h * i) / n}px`;
+      box.appendChild(line);
+    }
+  });
+  const stage = $('.guide-stage');
+  const scale = () => $$('.pguide').forEach(el => { el.style.zoom = Math.min(1, stage.clientWidth / el.offsetWidth); });
+  scale();
+  window.onresize = scale;
 }
 
 // ---------- 출결 (교사) ----------
