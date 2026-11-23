@@ -2213,12 +2213,53 @@ function renderSettings() {
       </form>
     </div>
     <div class="card" style="max-width:480px">
+      <h2 style="margin-bottom:8px">테스트 학생 계정</h2>
+      <p class="small muted">학생 화면을 직접 로그인해서 확인할 때 씁니다. 학번 <b>test</b>, 이름 <b>test</b>로 로그인하는 학생 한 명과 ‘테스트 팀’을 만듭니다. 대시보드에도 ‘테스트 팀’이 보이니 확인이 끝나면 삭제하세요.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="test-make">테스트 계정 만들기</button><button class="btn btn-danger" id="test-del">테스트 계정·팀 삭제</button></div>
+      <p class="err" id="test-err"></p>
+    </div>
+    <div class="card" style="max-width:480px">
       <h2 style="margin-bottom:8px">데이터</h2>
       <p class="small muted">모든 기록은 Firebase Firestore에 저장됩니다. 학기 말에는 CSV로 내려받아 보관하세요.</p>
       <button class="btn" id="csv">⬇ 전체 기록 CSV 내려받기 (엑셀용)</button>
     </div>`, 'settings');
 
   $('#csv').onclick = async () => downloadCsv(await fetchAllTeams());
+  // 테스트 학생: 실제 학생과 같은 방식(명단 대조)으로 로그인되는 가짜 팀원 한 명
+  const TEST = { team: 'test-team', sid: 'test', name: 'test' };
+  $('#test-make').onclick = async () => {
+    $('#test-err').textContent = '';
+    try {
+      const r = await getDoc(doc(db, 'roster', TEST.sid));
+      if (r.exists() && r.data().teamId !== TEST.team) throw new Error('학번 test가 이미 다른 팀에 있습니다.');
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'teams', TEST.team), {
+        name: '테스트 팀', topic: '테스트용 탐구 주제', purpose: '', place: '', time: '', leaderSid: TEST.sid, caution: '',
+        members: [{ sid: TEST.sid, name: TEST.name, role: '' }], budget: [], sessions: makeSessions(), order: 999,
+      }, { merge: true });
+      batch.set(doc(db, 'roster', TEST.sid), { name: TEST.name, teamId: TEST.team });
+      await batch.commit();
+      toast('만들었습니다. 로그아웃한 뒤 학생 탭에서 학번 test, 이름 test로 로그인하세요.');
+    } catch (e) {
+      $('#test-err').textContent = friendlyError(e);
+    }
+  };
+  $('#test-del').onclick = async () => {
+    if (!confirm('테스트 팀과 그 팀의 보고서·포스터를 모두 지울까요?')) return;
+    $('#test-err').textContent = '';
+    try {
+      const batch = writeBatch(db);
+      for (const sub of ['poster', 'reports', 'logs', 'attendance']) {
+        (await getDocs(collection(db, 'teams', TEST.team, sub))).forEach(d => batch.delete(d.ref));
+      }
+      batch.delete(doc(db, 'teams', TEST.team));
+      batch.delete(doc(db, 'roster', TEST.sid));
+      await batch.commit();
+      toast('테스트 계정과 팀을 지웠습니다.');
+    } catch (e) {
+      $('#test-err').textContent = friendlyError(e);
+    }
+  };
   $('#pw-form').onsubmit = async e => {
     e.preventDefault();
     try {
