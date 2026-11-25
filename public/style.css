@@ -288,6 +288,26 @@ summary { cursor: pointer; color: var(--accent); font-size: 14px; font-weight: 6
 .report-under details { flex: 1; }
 .report-under .count { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .example { margin-top: 8px; padding: 10px 12px; border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 8px; font-size: 14px; }
+/* 개인별 최종 보고서 문서 */
+.rdoc { max-width: 210mm; margin: 0 auto 20px; background: #fff; color: #111; border: 1px solid var(--line); box-shadow: var(--shadow); padding: 14mm 15mm 12mm; font-size: 14.5px; line-height: 1.7; }
+.rdoc-head { text-align: center; border-bottom: 3px double #111; padding-bottom: 10px; margin-bottom: 14px; }
+.rdoc-kicker { font-size: 12.5px; color: #555; letter-spacing: .04em; }
+.rdoc-head h1 { font-size: 24px; letter-spacing: .12em; margin-top: 2px; }
+.rdoc-info { border-collapse: collapse; width: 100%; margin-bottom: 16px; font-size: 14px; }
+.rdoc-info th, .rdoc-info td { border: 1px solid #555; padding: 7px 10px; vertical-align: middle; text-align: left; }
+.rdoc-info th { background: #f0f0f0; width: 92px; white-space: nowrap; font-weight: 700; text-align: center; color: #111; }
+.rdoc-info td.strong { font-weight: 700; font-size: 15.5px; }
+.rdoc-info p { margin: 0; }
+.rdoc-role { color: #555; font-weight: 400; }
+.rdoc-q { margin-bottom: 13px; }
+.rdoc-q h2 { font-size: 14.5px; font-weight: 700; display: flex; gap: 8px; align-items: baseline; border-bottom: 1px solid #111; padding-bottom: 3px; margin-bottom: 5px; break-after: avoid; }
+.rdoc-q h2 span { flex: none; font-weight: 800; }
+.rdoc-q h2 span::after { content: "."; }
+.rdoc-a p { margin: 0 0 4px; text-align: justify; padding-left: 4px; }
+.rdoc-empty { color: #999; font-style: italic; }
+.rdoc-foot { margin-top: 18px; padding-top: 8px; border-top: 1px solid #999; display: flex; justify-content: space-between; align-items: flex-end; font-size: 13px; color: #333; break-inside: avoid; }
+.rdoc-foot i { display: inline-block; width: 90px; border-bottom: 1px solid #111; margin-left: 6px; height: 1.2em; vertical-align: bottom; }
+
 .report-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 16px; }
 .report-sheet .readonly-block h3 { color: var(--text); font-size: 14px; }
 
@@ -416,6 +436,14 @@ body:has(#poster-form) .wrap { max-width: 1500px; }
   .poster-stage { border: 0; box-shadow: none; height: auto !important; overflow: visible; }
   .poster { transform: none !important; break-inside: avoid; }
   .report-sheet { break-after: page; border: 0; box-shadow: none; padding: 0; }
+  .rdoc { max-width: none; margin: 0; font-size: 10.5pt; line-height: 1.65; }
+  .rdoc-head h1 { font-size: 18pt; }
+  .rdoc-kicker { font-size: 9pt; }
+  .rdoc-info { font-size: 10pt; }
+  .rdoc-info td.strong { font-size: 11.5pt; }
+  .rdoc-q h2 { font-size: 10.5pt; }
+  .rdoc-foot { font-size: 9.5pt; }
+  .rdoc-a p { orphans: 2; widows: 2; }
   .report-sheet:last-of-type { break-after: auto; }
 }
 

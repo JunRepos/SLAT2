@@ -395,7 +395,7 @@ async function route() {
       if (parts[0] === 'pins') return await renderPins();
       if (parts[0] === 'attendance') return await renderAttendance(Number(parts[1]) || 0);
       if (parts[0] === 'budget') return await renderBudgetOverview();
-      if (parts[0] === 'reports') return await renderReports(parts[1] === 'all');
+      if (parts[0] === 'reports') return await renderReports(parts[1] === 'all', parts[2]);
       if (parts[0] === 'team' && parts[1] && parts[2] === 'report' && parts[3]) return await renderReport(parts[1], parts[3]);
       if (parts[0] === 'team' && parts[1] && parts[2] === 'poster') return await renderPoster(parts[1]);
       if (parts[0] === 'team' && parts[2] === 's' && parts[3] && parts[4] === 'edit') return await renderLog(parts[1], Number(parts[3]), true);
@@ -1077,16 +1077,41 @@ async function fetchReports(teamId) {
 
 const RULES_NOTICE = '최종 보고서 기능은 새 보안 규칙이 배포되어야 쓸 수 있습니다.';
 
+// 인쇄 용지 설정. 다른 화면으로 가면 route()가 지운다.
+function setPrintPage(css) {
+  document.getElementById('poster-page-style')?.remove();
+  const el = document.createElement('style');
+  el.id = 'poster-page-style';
+  el.textContent = `@page { ${css} }`;
+  document.head.appendChild(el);
+}
+const REPORT_PAGE = 'size: A4; margin: 15mm 16mm 14mm;';
+
+// 개인별 최종 보고서 한 부(문서 형식). 화면에서는 종이 모양으로, 인쇄하면 학생마다 새 쪽에서 시작한다.
 function reportSheet(team, m, r) {
+  const paras = t => t.trim().split(/\n+/).map(x => `<p>${esc(x.trim())}</p>`).join('');
+  const val = k => (r[k] || '').trim();
   return `
-    <div class="card report-sheet">
-      <div class="report-head">
-        <div><div class="muted small">${esc(team.name)} · ${esc(team.topic)}</div>
-          <h2>${esc(m.name)} <span class="muted small">${esc(m.sid)}${m.role ? ` · ${esc(m.role)}` : ''}</span></h2></div>
-        <div class="small muted">${r.submittedAt ? `제출 ${fmtDateTime(r.submittedAt)}` : ''} <span class="badge ${STATUS[r.status].cls}">${STATUS[r.status].label}</span></div>
-      </div>
-      ${REPORT_FIELDS.map(q => block(q.label, r[q.k])).join('')}
-    </div>`;
+    <article class="report-sheet rdoc">
+      <header class="rdoc-head">
+        <div class="rdoc-kicker">SLAT 학교주도활동 · 주제 탐구 프로젝트</div>
+        <h1>개인별 최종 보고서</h1>
+      </header>
+      <table class="rdoc-info">
+        <tr><th>탐구 이름</th><td colspan="3" class="strong">${esc(val('title') || team.topic || '')}</td></tr>
+        <tr><th>팀명</th><td>${esc(team.name)}</td><th>학번 · 이름</th><td><b>${esc(m.sid)} ${esc(m.name)}</b>${m.role ? ` <span class="rdoc-role">(${esc(m.role)})</span>` : ''}</td></tr>
+        <tr><th>최종 목표</th><td colspan="3">${val('goal') ? paras(val('goal')) : '<span class="rdoc-empty">작성 안 됨</span>'}</td></tr>
+      </table>
+      ${REPORT_QS.map((q, i) => `
+        <section class="rdoc-q">
+          <h2><span>${i + 1}</span>${esc(q.title)}</h2>
+          <div class="rdoc-a">${val(q.k) ? paras(val(q.k)) : '<p class="rdoc-empty">작성 안 됨</p>'}</div>
+        </section>`).join('')}
+      <footer class="rdoc-foot">
+        <span>${r.submittedAt ? `제출 ${new Date(r.submittedAt).toLocaleDateString('ko-KR')}` : '제출 전'} <span class="badge ${STATUS[r.status].cls} no-print">${STATUS[r.status].label}</span></span>
+        <span>담당 교사 확인 <i></i></span>
+      </footer>
+    </article>`;
 }
 
 async function renderReport(teamId, sid) {
@@ -1110,6 +1135,7 @@ async function renderReport(teamId, sid) {
     : '';
 
   if (isTeacher) {
+    setPrintPage(REPORT_PAGE);
     page(`
       <div class="crumb no-print"><a href="#/reports">최종 보고서</a> › ${esc(team.name)} › ${esc(m.name)}</div>
       <div class="page-head no-print"><h1>최종 보고서</h1>
@@ -1250,7 +1276,7 @@ async function renderReport(teamId, sid) {
 }
 
 // 교사: 전체 현황 / 모아 보기(인쇄용)
-async function renderReports(showAll) {
+async function renderReports(showAll, onlyTeam) {
   const teams = (await getDocs(collection(db, 'teams'))).docs
     .map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
@@ -1287,11 +1313,15 @@ async function renderReports(showAll) {
   };
 
   if (showAll) {
-    const shown = all.filter(x => x.r.status !== 'empty');
+    const written = all.filter(x => x.r.status !== 'empty');
+    const shown = written.filter(x => !onlyTeam || x.t.id === onlyTeam);
+    const tab = (id, label, n) => `<a href="#/reports/all${id ? `/${id}` : ''}" class="${(onlyTeam || '') === id ? 'active' : ''}">${esc(label)}<small>${n}명</small></a>`;
+    setPrintPage(REPORT_PAGE);
     page(`
       <div class="crumb no-print"><a href="#/reports">최종 보고서</a> › 모아 보기</div>
-      <div class="page-head no-print"><div><h1>최종 보고서 모아 보기</h1><p class="muted small">작성된 보고서 ${shown.length}건 · 인쇄하면 학생마다 새 쪽에서 시작합니다.</p></div>
+      <div class="page-head no-print"><div><h1>개인별 최종 보고서</h1><p class="muted small">작성된 보고서 ${shown.length}부 · A4로 인쇄되며 학생마다 새 쪽에서 시작합니다. PDF로 저장하려면 인쇄 창에서 ‘PDF로 저장’을 고르세요.</p></div>
         <div class="actions"><button class="btn-primary" onclick="window.print()">🖨 인쇄 / PDF 저장</button></div></div>
+      <div class="session-tabs no-print">${tab('', '전체', written.length)}${teams.map(t => tab(t.id, t.name, written.filter(x => x.t.id === t.id).length)).join('')}</div>
       ${shown.map(x => reportSheet(x.t, x.m, x.r)).join('') || '<div class="card muted">아직 작성된 보고서가 없습니다.</div>'}`, 'reports');
     return;
   }
@@ -1309,7 +1339,7 @@ async function renderReports(showAll) {
       <div class="stat"><div class="num">${n('approved')}</div><div class="lbl">확인 완료</div></div>
     </div>
     ${teams.map(t => `
-      <div class="section-title"><h2>${esc(t.name)}</h2><span class="muted small">${esc(t.topic)} · <a href="#/team/${t.id}/poster">포스터 보기 · 인쇄</a></span></div>
+      <div class="section-title"><h2>${esc(t.name)}</h2><span class="muted small">${esc(t.topic)} · <a href="#/reports/all/${t.id}">보고서 모아 인쇄</a> · <a href="#/team/${t.id}/poster">포스터 보기 · 인쇄</a></span></div>
       ${commonBox(t)}
       <div class="table-scroll"><table>
         <thead><tr><th>학생</th><th>상태</th><th class="num">분량</th><th>제출</th><th>피드백</th><th></th></tr></thead>
